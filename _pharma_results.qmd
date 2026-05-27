@@ -1,0 +1,141 @@
+### Results
+
+Our experiment runs are grouped into 3 combinations of model and dataset:
+
+- **Small models and hard negatives**: [all-MiniLM-L6-v2](sentence-transformers/all-MiniLM-L6-v2) and [nicher92/mined_negatives_pharma_qa](https://huggingface.co/datasets/nicher92/mined_negatives_pharma_qa)
+
+- **Small model and in-batch negatives**: [all-MiniLM-L6-v2](sentence-transformers/all-MiniLM-L6-v2) and [nicher92/combined_pharma_qa](https://huggingface.co/datasets/nicher92/combined_pharma_qa)
+
+- **Larger model and hard negatives**: [bge-small-en-v1.5](BAAI/bge-small-en-v1.5) and [nicher92/mined_negatives_pharma_qa](https://huggingface.co/datasets/nicher92/mined_negatives_pharma_qa)
+
+The purpose here is to test the effect of using richer data (hard negatives), as well the effect of using a stronger model in comparison to our MiniLM baseline. For each of these combinations, we run a number of experiments in order to better understand where performance degradation actually happens. These experiments are run in stages, with earlier stages informing hyperparameter selection for the next stage. Through a local hyperparameters sweep at each stage we approximate a local optimum before moving to the next step:
+
+1. **Centralized baseline**: we look for the best possible performance using centralized data using a single accelerator. Here we optimize common hyperparameters such as batch size, learning rate, and number of epochs.
+
+2. **Multi-accelerator**: As above, but in a 2 way DDP setting with homogeneous compute.
+
+3. **Homogeneous FL**: using our FL approach instead of DDP on the same compute and data.
+
+4. **Heterogeneous FL**: instead of just two identical accelerators, we use our FL approach with an additional, different accelerator but matching the batch size of the previous ones.
+
+5. **Full heterogeneous FL**: as above, but adding yet another, different accelerator that uses a different batch size altogether.
+
+
+#### Hyperparameter Optimization
+
+As mentioned in a previous section, because of the importance of contrastive learning in our use case, the batch size is a key hyperparameter. Performance generally scaled favorably with increasing batch sizes (results not reported here, but available in supplementary material / training logs).
+
+Because we use STS-B to monitor loss of general language understanding, we feel comfortable training for multiple epochs; all experiments show that performance continues to scale with additional epochs beyond the first. All FL experiments use 9 federation rounds with 1 local epoch per round unless otherwise stated. Our evaluation metrics generally converged by this point, see supplementary material.
+
+Finding a suitable learning rate can be tricky as many factors are at play, even though our chosen `adamw_torch_fused` makes the learning somewhat robust to the actual choice here. In particular, larger batches require larger learning rates (we generally rely on either the linear or square root scaling law when adapting to new setups, see above); it must also be adapted to the quantity of data available (i.e. splitting the training dataset across 4 shards gives each accelerator less data to work with, which can be compensated with larger strides / learning rates). In addition, larger models are known to be more sensitive to larger learning rates. We typically search in a neighborhood of 50% to 150% of the estimated LR values. Our starting value is given by a more exhaustive search for the centralized baseline, see above. In some cases, following this rule lead to exploding gradients or model non-convergence; in this case the LR was strongly corrected downward.
+
+
+#### No RAG Baseline
+
+The baseline for our experiments is twofold: 1) the retrieval performance of the embedding model with no finetuning at all, and 2) the performance of the RAG when using a non-finetuned embedding model. To get a sense for the importance that fine-tuning makes in this use case, we compute all retrieval and RAG evaluation metrics with and without finetuned models. @fig-baseline shows the results for some select runs. 
+
+Not surprisingly, because both our train and evaluation data are open source, we reasonably expect the all base models to have been pretrained on this data; this adds a significant, but unavoidable bias into our evaluation procedure, as procuring propietary data for this project was not possible. The numbers below show that 1) adding contextual RAG information helps substantially regardless, and 2) the performance increase of a finetuned embedding model on the final RAG evaluation is comparatively small. 
+
+::: {#fig-baseline}
+
+| Model | Configuration | Compute | MRR@10 | RAG Eval |
+|:--- |:--- |:--- |:--- |:--- |
+| **`minilm-L6-v2`** | Base Model | N/A | **~0.5** | **0.918** |
+| **`mpnet-base-v2`** | Base Model | N/A | N/A | **0.919** |
+| **`mpnet-base-v2`** | Finetuned (DDP) | 4x A100 | [0.689]{style="color: green; font-weight: bold;"} | [0.931]{style="color: green; font-weight: bold;"} |
+
+Model performance with and without fine-tuning. Performance for downstream model with **no RAG context** is **0.828**
+:::
+
+
+#### Small Model & Hard Negatives
+
+First, we take a look at the single accelerator baseline, examining e.g. the impact of the loss function. See notes above for details on why loss functions such as `CachedGISTEmbedLoss` are not a good match for accelerators like Gaudi that rely on building and running static graphs. This initial experiment also allows us to observe the tradeoff between training for longer (i.e. 9 epochs vs. 1) and the loss of generalization performance. Unless otherwise specified, we define all model runs with STS-B $\rho > 0.60$ as valid, i.e. not collapsed.
+
+::: {#fig-singlehpu}
+
+| Run | Model / Loss | Config | Compute | MRR@10 | $\rho$ (STS-B) | RAG |
+|:--- |:--- |:--- |:--- |:--- |:--- |:--- |
+| **`bold-starfish`** (GIST Baseline) | MiniLM CachedGIST | 1-Epoch MBS-256 BS-2048 LR-12e-5 | 1x Gaudi2 | **0.720** | N/A | **0.93** |
+| **`juicy-bear`** (Optimized Single) | MiniLM MNRL | 9-Epochs BS-8192 LR-6e-4 | 1x Gaudi2 | [0.866]{style="color: green; font-weight: bold;"} | [0.740]{style="color: green; font-weight: bold;"} | [0.932]{style="color: green; font-weight: bold;"} |
+
+
+: {tbl-colwidths="[17, 15, 15, 14, 12, 15, 12]"}
+
+Single HPU baseline showing the performance impact of a caching loss, epoch count, LR and BS on Gaudi 2 (MBS = mini batch size, BS = batch size, LR = learning rate)
+:::
+
+
+Next, @fig-twohpu shows results for a 2 HPU setup and results for DDP and FL setups. As validated in other experiments, this shows that using FL in such a homogeneous compute usually shaves off about 2 points of `MRR@10` score, with the RAG score remaining robust; STS-B $\rho$ likewise remains either unaffected or at times even benefits.
+
+::: {#fig-twohpu}
+
+| Run | Mode | Config | Compute | MRR@10 | $\rho$ (STS-B) | RAG |
+|:--- |:--- |:--- |:--- |:--- |:--- |:--- |
+| **`juicy-bear`** (Baseline) | Single | MNRL LR-6e-4 BS-8192 | 1x Gaudi2 | **0.866** | **0.740** | [0.932]{style="color: green; font-weight: bold;"} |
+| **`spicy-nautilus`** | DDP | MNRL BS-8192 LR-1.7e-3 | 2x Gaudi2 | [0.869]{style="color: green; font-weight: bold;"} | **0.746** | N/A |
+| **`red-mongrel`** | FL | MNRL BS-8192 LR-1.7e-3 | 2x Gaudi2 | **0.847** | **0.740** | **0.925** |
+| **`aromatic-squirrel`**| FL | As above + LR-Stretching | 2x Gaudi2 | **0.847** | [0.756]{style="color: green; font-weight: bold;"} | N/A |
+
+
+: {tbl-colwidths="[17, 13, 17, 14, 12, 15, 12]"}
+
+2-HPU runs in DDP (9 epochs) and FL (FedAvg) using 9 federation rounds and 1 local epoch per round.
+:::
+
+Finally, @fig-fullfl shows the results for FL with the full heterogeneous compute setups. The results here are interesting: using heterogeneous compute (including different batch sizes) leads to a clear drop in the `MRR@10` metric as expected (in this case we are averaging high-definition and low-definition signals, see section above on the significance of the batch size for the loss), but likewise seems to act a regularizer in terms of the model's overall generalization ability; furthermore, the downstream RAG metric also slightly increases here. 
+
+::: {#fig-fullfl}
+
+| Run | Hardware, Loss, BS, LR | MRR@10 | $\rho$ (STS-B) | RAG |
+|:---|:---|:---|:---|:---|
+| **`red-mongrel`** (Homogeneous FL) | **2x-Gaudi2:** MNRL BS-8192 LR-1.7e-3 | [0.847]{style="color: green; font-weight: bold;"} | **0.740** | **0.925** |
+| **`polar-hamster`** (Full Heterogeneous) | **2x-Gaudi2:** MNRL BS-8192 LR-1.7e-3 **1x-AMD:** CachedGIST BS-(256,8192) LR-1.7e-3 **1x-A100:** CachedGIST BS-(256,2048) LR-4.25e-4 | **0.741** | [0.845]{style="color: green; font-weight: bold;"} | [0.933]{style="color: green; font-weight: bold;"} |
+| **`glistening-starling`** (A100 Dropped) | **2x-Gaudi2:** MNRL BS-8192 LR-1.7e-3 **1x-AMD:** CachedGIST BS-(256,8192) LR-1.7e-3 | **0.768** | **0.788** | **0.931** |
+
+: {tbl-colwidths="[24, 44, 12, 14, 8]"}
+
+Homogeneous FL baseline and full heterogeneous FL setups. All FL experiments used 9 federation rounds with 1 local epoch per round. Gaudi2: 96GB, AMD 7900XT: 46GB, A100: 40GB
+:::
+
+
+#### Small Model and In-Batch Negatives
+
+We present results analogous to the previous section, but for in-batch negatives rather than mined hard negatives. @fig-inbatch1 shows the best runs across all setups. Performance drops significantly in comparison to hard negatives, as expected. Furthermore, we see the same ~2 point performance penalty of homogeneous FL as before, as well as the major retrieval performance drop when using heterogeneous compute.
+
+::: {#fig-inbatch1}
+
+| Run | Mode | Config | Compute | MRR@10 | $\rho$ STS-B | RAG |
+|:--- |:--- |:--- |:--- |:--- |:--- |:--- |
+| **`perfect-coucal`** | Single | MNRL BS-8192 LR-6e-3 | 1x-Gaudi2 | [0.741]{style="color: green; font-weight: bold;"} | **0.639** | **xx** |
+| **`thistle-jackal`** | DDP | MNRL BS-8192 LR-1.7e-3 | 2x-Gaudi2 | [0.741]{style="color: green; font-weight: bold;"} | **0.696** | **xx** |
+| **`capable-chicken`** | FL (LR-Stretch) | MNRL BS-8192 LR-1.7e-3 | 2x-Gaudi2 | **0.725** | **0.719** | **xx** |
+| **`tough-mushroom`** | FL (LR-Stretch) | **Gaudi2:** MNRL BS-8192 LR-1.7e-3 **AMD**: CachedGIST MBS-256 BS-8192 LR-1.7e-3 | 2x-Gaudi2 1x-AMD | **0.622** | **0.782** | **xx** |
+| **`mini-bullmastiff`** | FL (LR-Stretch) | **Gaudi2:** MNRL BS-8192 LR-1.7e-3 **AMD**: CachedGIST MBS-256 BS-8192 LR-1.7e-3 **A100**: CachedGIST MBS-256 BS-2048 LR-4.25e-4 | 2x-Gaudi2 1x-AMD 1x-A100 | **0.631** | [0.806]{style="color: green; font-weight: bold;"} | **xx** |
+
+
+: {tbl-colwidths="[12, 15, 27, 15, 12, 15, 4]"}
+
+Best single, 2-HPU, and FL (homogeneous and heterogeneous) runs for in-batch negatives and `all-MiniLM-L6-v2`. Non-FL runs use 9 epochs; FL runs use FedAvg and 9 federation rounds and 1 local epoch per round. Gaudi2: 96GB, AMD 7900XT: 46GB, A100: 40GB
+:::
+
+
+#### Larger Model and Hard Negatives
+
+Finally, we present results for mined hard negatives and the larger, more modern embedding model `bge-small-en-v1.5`. @fig-hardneg1 shows the best runs across all setups. The general patterns from previous experiments can also be seen here. Interestingly, the smaller, simpler model outperforms the larger one, despite our training curves showing convergence after 9 epochs / federation rounds. This suggests that highly optimized modern models like BGE may be less malleable to simple contrastive fine-tuning on narrow domain data compared to older, simpler architectures, likely requiring more sophisticated regularized tuning to prevent manifold disruption.
+
+::: {#fig-hardneg1}
+
+| Run | Mode | Config | Compute | MRR@10 | $\rho$ (STS-B) | RAG |
+|:--- |:--- |:--- |:--- |:--- |:--- |:--- |
+| **`authentic-salmon`** | Single | MNRL BS-7168 LR-1e-3 | 1x-Gaudi2 | [0.81]{style="color: green; font-weight: bold;"} | **0.74** | **xx** |
+| **`loud-wrasse`** | DDP | MNRL BS-7168 LR-2e-3 | 1x-Gaudi2 | **0.807** | **0.706** | **xx** |
+| **`crouching-echidna`** | FL (LR-Stretch) | MNRL BS-7168 LR-2e-3 | 2x-Gaudi2 | **0.78** | **0.735** | **xx** |
+| **`humongous-pogona`** | FL (LR-Stretch) | **Gaudi2:** MNRL BS-7168 LR-5e-4 **AMD**: CachedGIST MBS-256 BS-7168 LR-5e-4 | 2x-Gaudi2 1x-AMD | **0.731** | **0.873** | **xx** |
+| **`groovy-skylark`** | FL (LR-Stretch) | **Gaudi2:** MNRL BS-7168 LR-2e-4 **AMD**: CachedGIST MBS-256 BS-7168 LR-2e-4 **A100**: CachedGIST MBS-256 BS-2048 LR-2e-4 | 2x-Gaudi2 1x-AMD 1x-A100 | **0.716** | [0.889]{style="color: green; font-weight: bold;"} | **xx** |
+
+
+: {tbl-colwidths="[12, 15, 25, 15, 12, 17, 4]"}
+
+Best single, 2-HPU, and FL (homogeneous and heterogeneous) runs for mined hard negatives and `bge-small-en-v1.5`. Non-FL runs use 9 epochs; FL runs use FedAvg and 9 federation rounds and 1 local epoch per round. Gaudi2: 96GB, AMD 7900XT: 46GB, A100: 40GB
+:::

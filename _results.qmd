@@ -1,0 +1,32 @@
+This project resulted in a number of output artifacts, including a codebase spanning 4 repositories, 2 curated datasets, and over 200 model training runs and ablations to produce the results detailed in the remaining sections of this report. All project results are open source and are available as supplementary materials to this report.
+
+#### Code Repositories
+
+- [pymaxq](https://gitlab.mgmt.ai.se/dev-tools/pymaxq) - This repository is a template for Python projects in Gitlab, incorporating best-in-class tools and patterns for software development in Python, building in practices such as commit hooks, unit testing, documentation, code and documentation versioning, code releases, CI/CD deployment pipelines, etc. into the software development workflow. Both repositories below were built starting from this template.
+
+- [nextgen-framework](https://gitlab.mgmt.ai.se/nextgeninfra/nextgen_framework) - This repository houses the generic federated learning framework designed in this project. The code here is agnostic to the downstream use case, and is designed as a minimal Python dependency that makes the key decentralized learning abstractions visible to the user. By implementing these abstractions for their use case, users can leverage the functionality for training models using federated learning across heterogenous infrastructure setups in their own projects.
+
+- [nextgen-train](https://gitlab.mgmt.ai.se/nextgeninfra/nextgen-train) - This repository contains the code for the pharmaceutical Q/A use case. It imports and leverages `nextgen-framework` as a dependency, and is meant to show users an example of how this is done in a practical way. More generally, this repository is meant to validate our claims regarding the usability and practicality of this learning framework. 
+
+- [MISSING REPO](www.google.com) - A repository containing performance evaluation tools for the RAG system built for the pharmaceutical Q/A use case. It "imports" embedding models finetuned using the (federated) logic from the two preceding repositories and assess their impact on the wider RAG system.
+
+
+#### Data
+
+The principal use case for this project was centered on factual data retrieval using LLMs in a RAG setup. The project's contribution to the pharmaceutical Q/A use case is to provide evidence that training / fine-tuning specialist embedding models can indeed increase performance of the downstream (chat) models in this domain. The training of these embedding models focused exclusively on contrastive learning approaches.
+
+This is a key consideration, since contrastive learning requires training data with a particular format. We curated (as a preprocessing measure) two datasets for this purpose, focusing on two key aspects: 1) mining hard negataives, and 2) supplementing our rather limited dataset with further in-domain data from open-large scale datasets. This results in the following pre-processed datasets, explained more in depth in the sections below:
+
+- [nicher92/mined_negatives_pharma_qa](https://huggingface.co/datasets/nicher92/mined_negatives_pharma_qa) -- The [DailyMed data](https://dailymed.nlm.nih.gov/dailymed/) dataset, parsed and structured with (pre-mined) hard negatives for training, for a total of about 2 million examples.
+
+- [nicher92/combined_pharma_qa](https://huggingface.co/datasets/nicher92/combined_pharma_qa) -- This data is used for in-batch negative training. It contains the positive pairs from the [EMA leaflets](https://www.ema.europa.eu/en/medicines/download-medicine-data), with an additional ~1 million pharmaceutical related texts mined from [fineweb-edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu).
+
+- RAG evaluation Q/A dataset -- This dataset was created for the purpose of validating the performance of the integrated RAG system, resulting in 1952 questions created from 500 different [EMA leaflets](https://www.ema.europa.eu/en/medicines/download-medicine-data). Q/A pairs were created based on these leaflets using GPT4o.
+
+#### Models & Evaluation
+
+We ran experiments resulting in over 200 fine-tuned models as part of this demonstrator. For each of these model runs and ablations we track a key set of metrics that have been synthesized into the results section of this report (see use-case section). Providing the models themselves (and their intermediate versions across FL training) is not feasible due to their size and number, however we provide a copy of all training run metric logs across all of our experiments in the form of several MLFlow `mlruns` directories (one for each GPU host, experiments are name-matched across these), attached as supplementary material to this report. Please refer to the experiments and results evaluation below for a summary of our findings.
+
+
+
+

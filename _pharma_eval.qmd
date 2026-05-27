@@ -1,0 +1,120 @@
+### Evaluation
+
+We evaluate success on two distinct fronts: the embedding model's retrieval metrics in isolation, and the end-to-end performance of the overarching RAG system. It is important to note that these two fronts are only loosely correlated. Retrieval metrics, such as Mean Reciprocal Rank (MRR), heavily penalize de-ranking. Conversely, the overall RAG generator's performance is conditioned on a top-k hyperparameter; whether the correct information is retrieved at rank 1 or rank 10 is largely inconsequential to the generative model, provided the context is retrieved at all.
+
+From an engineering perspective, MRR serves as a measure of mathematical sharpness and cost-efficiency—when the correct semantics are isolated at rank 1, fewer documents need to be passed into the generator's context window, saving compute and tokens. On the other hand, the evaluation of the full RAG pipeline serves as an overall user-experience score for the entire system.
+
+#### Retrieval
+
+To isolate and evaluate the embedding model's core performance, we reserve a small 2% holdout set from the training data. From this holdout set, we construct a comprehensive evaluation corpus containing all true `Positive` (and `Negative`, if using mined negatives) documents across all query anchors. During evaluation, the model embeds both the query anchors and the entire text corpus into the latent space. For every anchor, the system ranks all corpus embeddings based on their cosine similarity to the query. For the actual evaluation, we use an [InformationRetrievalEvaluator](https://sbert.net/docs/package_reference/sentence_transformer/evaluation.html#informationretrievalevaluator) to output a default set of evaluated metrics. In particular, these include: 
+
+- `Accuracy@k`: This measures whether the true positive document successfully appears within the top $k$ retrieved results (e.g., `Accuracy@1`, `Accuracy@5`, `Accuracy@10`).
+
+- `Mean Reciprocal Rank (MRR)`: This metric evaluates exactly where the first correct answer appears in the ranking. If the correct document does not appear within the top 10 results, it is assigned a score of 0.0. The overall MRR is calculated as the average of the reciprocal ranks across all queries $Q$:
+
+    $$\text{MRR} = \frac{1}{|Q|} \sum_{i=1}^{|Q|} \frac{1}{\text{rank}_i}$$
+
+These metrics are computed continually during training. We use `MRR@10` as the principal metric to judge model performance. 
+
+##### The Generalization Guardrail
+
+Fine-tuning a model on highly specialized, domain-specific data inherently risks catastrophic forgetting—a phenomenon where the model loses its foundational language capabilities. To guard against this while optimizing for our pharmaceutical dataset, we implement a generalization guardrail using the [Semantic Textual Similarity Benchmark (STS-B)](https://huggingface.co/datasets/sentence-transformers/stsb).
+
+STS-B is a standard benchmark for general language understanding. It consists of pairs of sentences accompanied by human-annotated similarity scores ranging from 0.0 to 5.0. We instruct our fine-tuned model to compute the cosine similarity for every pair in the benchmark and compare its rankings against the human annotations using the Spearman Rank Correlation ($\rho$):
+
+$$\rho = 1 - \frac{6 \sum d_i^2}{n(n^2 - 1)} \qquad d_i = \delta(\text{human}, \text{model})$$
+
+
+This correlation answers a critical sanity-check question: *Do the model's similarity rankings still match human intuition on general text?* Based on established benchmarks, we use a rough heuristic to gauge model health: a score in the $[0.8, 1.0]$ range indicates the model remains a highly capable generalist, $[0.6, 0.8]$ suggests a healthy specialist model that has traded some general knowledge for domain expertise, and a score in the $[0.0, 0.6]$ range indicates that the embedding space has mathematically collapsed.
+
+#### RAG
+
+We derive 1952 questions from over 500 medicines found in the [EMA dataset](https://www.ema.europa.eu/en/medicines/download-medicine-data). Each question features 4 multiple-choice alternatives generated with strict plausibility instructions; this design prevents the correct answer from being deduced through formatting inconsistencies or obvious semantic clues. The downstream model is then tasked with selecting a response, and a simple accuracy metric is used to quantify the result (random guessing baseline = 25%). Throughout all experiments we fix `top_k=5`, i.e. we take the 5 most similar embeddings from the entire EMA dataset into the model context window. The prompt to the downstream model is simple:
+
+::: {.prompt-box}
+Use the context below to answer the question. Answer with only the letter of the correct choice (A, B, C, or D).
+
+Context: {context}
+
+Question: {question}
+
+Answer:
+:::
+
+See @fig-metformin-quiz for an example of Q/A input and output.
+
+::: {#fig-metformin-quiz}
+
+::: {layout="[[45, 55]]"}
+
+::: {.quiz-card}
+[Metformin Hydrochloride]{.quiz-tag} [Warnings & Precautions]{.quiz-tag}
+
+[Question]{.label-orange}
+What is a rare but serious metabolic complication associated with the accumulation of Metformin Hydrochloride?
+
+[Context]{.label-blue}
+Lactic acidosis is a rare, but serious, metabolic complication that can occur due to metformin accumulation during treatment with metformin hydrochloride extended-release tablets...
+:::
+
+::: {.quiz-card}
+[Options]{.label-dark}
+
+::: {.mcq-option}
+**Option A** Hypoglycemia
+:::
+::: {.mcq-option .correct}
+**Option B (correct)** Lactic acidosis
+:::
+::: {.mcq-option}
+**Option C** Diabetic ketoacidosis
+:::
+::: {.mcq-option}
+**Option D** Vitamin B12 deficiency
+:::
+
+> **Explanation**
+> The context explicitly states that lactic acidosis is a rare, but serious, metabolic complication that can occur due to metformin accumulation.
+:::
+
+:::
+
+Sample multiple-choice evaluation block.
+:::
+
+##### Creating the QA Dataset
+
+The package leaflet data from a random sample of 500 documents were first extracted. 4 key sections from the leaflet data (*What you need to know before you take X*, *Possible side effects*, *How to take X*, *What is X and what is it used for*) were used to create section-specific prompts for GPT4o, which generated the Q/A pairs and  distractors in a single-shot approach based on [@10.1145/3726302.3730283]. Passing on that context, the prompt had the following form:
+
+::: {.prompt-box}
+**Target Section:** *What the medicine is and what it is used for*
+
+**System Context:** The RAG system provides information from medical leaflets to patients of any age, gender, or background. The text below describes what the medicine is and what it is used for.
+
+**Task:** Your task is to generate ONE multiple choice question (MCQ) based on the provided text.
+Each MCQ must include:
+
+- 'question': A clear question a patient might ask
+- 'options': A dict with keys 'A', 'B', 'C', 'D' containing four answer options
+- 'correct_answer': The key of the correct option (e.g., 'A')
+- 'correct_answer_text': The full text of the correct answer
+- 'context': The exact sentence(s) from the provided text that support the correct answer
+- 'explanation': A brief explanation of why the correct answer is right
+
+Rules:
+
+1. All incorrect options (distractors) must be plausible but clearly wrong based on the text. There should only ONE correct answer and THREE distractors.
+2. The context must be a direct quote or close paraphrase from the provided text.
+3. Only include the medicine name in the question, NOT in the answer options.
+4. Do not repeat the same question.
+5. Avoid overly technical language; questions should be understandable to a general audience.
+6. Output FORMAT must be a JSON array of MCQ objects. 
+
+**Example Questions:**
+
+* *For whom is `{medicine}` intended?*
+* *How does `{medicine}` work?*
+* *What conditions does `{medicine}` treat?*
+:::
+
+

@@ -1,0 +1,12 @@
+### AI Sweden {.unlisted .unnumbered}
+* **Laurian Lamba** — *Lab wizard*
+* **Ted Henriksson** — *Lab wizard*
+* **Max Petersson** — *Lab wizard*
+* **Rasmus Maråk** — *ML Engineer*
+* **Niclas Hertzberg** — *NLP Scientist*
+* **Tim Isbister** — *NLP Scientist*
+* **Amaru Gyllensten** — *NLP Scientist*
+* **Nina Ökvist** — *NLP Team Lead*
+* **Tommy Schonberg** — *Project Lead*
+* **Amelia Högberg** — *Project Coordinator*
+* **Mauricio Muñoz** — *Project Research Lead*

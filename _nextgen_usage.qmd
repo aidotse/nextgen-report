@@ -1,0 +1,423 @@
+### Hands On NextGenFramework
+
+This section provides additional details into NextGenFramework, focusing on what the current implementation looks like on a low level. The following provides these details from the perspective of a user guide for prospective users interested in integrating this software package into their own project from scratch. The idea is to show what exactly happens at the intersection of the framework and projects that use it, in order to showcase the framework's ease-of-use and generality.
+
+#### Add the NextGenFramework Dependency
+
+If you are managing your project dependencies with [uv](https://docs.astral.sh/uv/):
+
+Specify the package source for NextGenFramework e.g. in your `pyproject.toml`:
+
+```bash
+[tool.uv.sources]
+nextgen_framework = { index = "nextgen" }
+
+[[tool.uv.index]]
+name = "nextgen"
+url = "https://gitlab.mgmt.ai.se/api/v4/projects/63/packages/pypi/simple"
+
+```
+
+Specify the dependency:
+
+```bash
+[dependency-groups]
+training = ["nextgen_framework", ...]
+```
+
+Authenticate uv:
+
+Perhaps the easiest way to authenticate `uv` is to set the corresponding environment variables, which follow a specific syntax:
+
+```text
+UV_INDEX_<NAME>_USERNAME
+UV_INDEX_<NAME>_PASSWORD
+```
+
+Where `<NAME>` corresponds to the `name` attribute given in `tool.uv.index` in the `pyproject.toml` for this resource. So, in this example, for the NextGen dependency you need to set
+
+```text
+UV_INDEX_NEXTGEN_USERNAME
+UV_INDEX_NEXTGEN_PASSWORD
+```
+
+where the username corresponds to e.g. your Gitlab username and the password corresponds to a GitLab Personal Access Token (PAT) / Deploy Token with at least `read_api` access. Get this from the maintainers / admins of the NextGenFramework repository.
+
+Recommended: create a `.env` file in the root of the project (this file is git-ignored) and add these credentials there directly.
+
+
+#### Wrapping Your Training Logic
+
+NextGenFramework uses a `BaseTrainer` abstraction that you should override with your own training logic:
+
+```python
+from nextgen_framework.interfaces import BaseTrainer, TrainerArgs
+from pathlib import Path
+
+class Trainer(BaseTrainer):
+    """Dummy trainer implementation for illustration purposes."""
+
+    def __init__(self, cfg: TrainerArgs):
+        super().__init__(cfg)
+        # Access parameters like self.cfg.param1, etc.
+
+    def setup(self) -> Path:
+        """Runs on the master, creates initial model, returns its Path."""
+
+        # Download model from HF, etc. and save to file
+        # ...
+        return Path("/path/to/your/local/model")
+
+    def train(self, model_path: Path, version: str) -> Path:
+        """Runs on the client. Load model at the path and train."""
+
+        # load model, train, local evaluation, etc.
+        # ....
+        # save new trained model and return it
+        return Path("/path/to/updated/model/or/artifact")
+
+    def reduce_models(self, model_paths: list[Path], version: str) -> Path:
+        """Runs on the master. Aggregate all models with the given paths"""
+
+        # E.g. FedAvg: perform simple averaging across all models
+        # ...
+        # Save new aggregated model
+        return Path("/path/to/new/aggregated/model/or/artifact")
+
+    def eval_model(self, model_path: Path, version: str) -> None:
+        """Runs on the master. Evaluate the model with given version and path"""
+
+        # Load evaluation dataloaders, run benchmarks, and log results, etc.
+        # ...
+
+```
+
+1. The `train` method is what is executed on each client nodes. It takes the `Path` to a saved (global) model with the given version, continues training e.g. for a given set of epochs or steps, saves the result, and returns the `Path` to it. Note that we abstract away what exactly is being stored - it could be a raw binary file with the model weights, a complete `transformers.Trainer` object, etc. Up to you to encode and decode it. The framework will automatically package and upload the entire directory (or single file) pointed to by your returned Path to the central Model Registry as a versioned artifact.
+
+2. Similarly, the `reduce_models` method is run by the master node, and reduces models pointed to by the given list of `Path`s to a single model instance, the `Path` of which is returned. This is where you would implement different federated aggregation strategies.
+
+3. Your `Trainer`'s init method should receive a `nextgen_framework.interfaces.TrainerArgs` object as an input. This is a thin wrapper around an OmegaConf `DictConfig` object.In order to pass arguments to your trainer, you need to parametrize your application as described in the next section.
+
+NextGenFramework manages the low-level orchestration that makes the input model available at each of their respective input `Path`s above, however you are in control of where the "output" models of each method are stored locally. These are uploaded to the Model Registry anyway, so using e.g. transient, temporary directories is perfectly fine.
+
+Also note, you can communicate (e.g. variable) state between the `init` method and the other methods, but these methods cannot communicate state with each other directly because they are designed to run in different places. This is why the model and its training state has to be saved and loaded from disk - models are first pulled from the common storage (e.g. Gitlab model registry) and saved locally for training or aggregation.
+
+#### Parametrizing your application and training run
+
+[Hydra](https://hydra.cc/) makes it very easy to structure your training runs as experiments with hyperparameters that can be overridden dynamically at runtime. The following represents an example top-level experiment config. Note that you don't necessarily have to rewrite your entire application in this way - you can also "hardcode" the elements from point 1 below directly in your Trainer class, at the cost of making it less reusable. We require a config file with at least the following items:
+
+- A config group that points to the NextGenFramework trainer you created in the previous step. Below: `trainer: mytrainer`.
+- A config group that points to the NextGenFramework config settings. Below: `framework: framework`.
+
+    ```yaml
+    # File: my_config.yaml
+
+    defaults:
+    - _self_
+    - framework: framework
+    - trainer: mytrainer
+    - data: mydata
+    - logger: mylogger
+    - model: mymodel
+
+    # random seed
+    seed: 52
+
+    # Default overrides
+    run_name: "" # Leave empty to auto generate slug
+    output_dir: ./output-nextgen/
+
+    # Important! Don't leave this out - this lets you also modify the default configuration options of the framework itself
+    hydra:
+      searchpath:
+        - "pkg://nextgen_framework/config"
+    ```
+
+1. In your application code you specify the config groups for `data`, `logger` (e.g. MLFlow, W&B, etc.), `model`, etc. These are the things that your specific application knows about independently of `NextGenFramework`. These are all optional.
+
+2. Add a new config group called `trainer` to point NextGenFramework to the actual trainer implementation you want to use. We would expect a directory with name `trainer` on the same level as the location of the config file `my_config.yaml` above, with a file called e.g. `mytrainer.yaml` that points to e.g. wherever you have stored your trainer implementation:
+
+    ```yaml
+    # File: mytrainer.yaml
+
+    # Modify this path to point to wherever your logic is stored
+    _target_: my_app.nextgen_trainer.Trainer 
+    ```
+
+3. By adding `NextGenFramework` as a dependency, you can now add a new config group called `framework`, giving you access to the configuration options of the framework itself, which include all of the settings for the federated learning orchestration. See `nextgen_framework/config/framework/framework.yaml` for details. Make sure to modify the Hydra searchpath as in the example above, in order to make these options visible in your project.
+
+4. Define the entry point to your application, which parses your configuration file. The configuration file is used to create a `nextgen_framework.runner.FrameworkRunner`, which creates and starts the requested node, and initializes and starts your Trainer in that node.
+
+    ```python
+    # File: run_app.py
+
+    import hydra
+    from hydra.utils import instantiate
+    from omegaconf import OmegaConf
+    from dotenv import load_dotenv
+
+    @hydra.main(config_path="../nextgen_train/configs", config_name="nextgen")
+    def main(cfg):
+        """Entrypoint for NextGen integration."""
+
+        print("--- Starting Framework Run ---")
+        runner = instantiate(cfg.framework.framework_runner)
+        runner.run(cfg)
+        print("--- Framework Run Finished ---")
+
+    if __name__ == "__main__":
+        main()
+
+    ```
+
+5. We can now connect the full "path" of how your chosen hyperparameters and their overrides connect to the trainer: you can call your application like in the following example:
+
+    ```bash
+    uv run python run_app.py framework/node=client framework.max_iter=5 framework.node.client_id=1
+    ```
+
+In this call you can overwrite any of the parameters you specified in `my_config.yaml` or any of its sub-config files, including parameters of NextGenFramework itself, like in the example above. All parameters values (whether overriden or their default values) are passed to your trainer and available in the object passed to its `init` method.
+
+
+#### Running Nodes
+
+You retain total control in terms of where and how to runs which nodes, which allows you to be extra flexible in terms of how to organize your model learning. As an example, you could have the following setup:
+
+1. Deploy a master node manually on your local machine. Mark the name (slug) of the experiment run used (look at the logs - this is generated randomly and automatically unless you specify it).
+
+2. Deploy a client node on an enterprise cluster via a scheduler on a queue with several large GPUs to benefit from faster training, specifying the same experiment run used in step 1. This tells this client to connect to the training run and to download the model that has been already been setup by the master node.
+
+3. Deploy a client node on a smaller VM hosted elsewhere, with additional accelerators attached directly, following the same instructions as above.
+
+All of these resources come together to run your distributed training task. The subsections below provide more details for these different types of deployment.
+
+
+#### Running a Node Manually 
+
+This project's key concern is to connect compute resources regardless of what environments they may sit in. In this context, "running a node manually" refers to use cases where you have *direct* access to compute resources, through e.g. remote access, or cloud compute scenarios. All experiments in this project that used this approach connected client nodes to GPUs or HPUs via a virtual machines in a local lab environment, however running client nodes in cloud compute environments was also successfully tested with [IBM Cloud](https://www.ibm.com/solutions/cloud). Both situations require the central Gitlab instance (or whatever "blackboard" is used) to be visible, which in the case of cloud compute services managed by third parties may require additional whitelisting of IP addresses and ports. The following looks at the process of manual node deployment in more depth with this basic assumption in mind.
+
+The current implementation uses Gitlab as the intermediary communication buffer between master and client nodes in the federation network, and as a first step you will need to setup authentication for Gitlab manually.  Nodes will need to communicate with Gitlab to push and pull models from the model registry. To authenticate these requests, you can create `Project Access Tokens` to distribute to anyone that will participate in running either a client or master node. These tokens should have at least the following scopes: `api`, `read_registry` and `write_registry`, and a `Maintainer` role.
+
+These need to be set as environment variables wherever a node is run.
+
+```bash
+# File: .env
+
+export MLFLOW_TRACKING_TOKEN=<your PAT>
+export MLFLOW_TRACKING_URI=<the MLFlow integration endpoint for your repo>
+```
+
+As an example, an MLFlow endpoint can look something like this: ` https://gitlab.mgmt.ai.se/api/v4/projects/<your project ID>/ml/mlflow/`, where `<your project ID>` can be read off your main repository settings.
+
+Recommendation: keep these variables in a local `.env` file together with the `uv` authentication variables discussed above. 
+
+To run your application:
+
+```bash
+source .env
+uv run python run_app.py ...
+```
+
+In this example, `run_app.py` is the main entry point you have defined for this application, see above. Optionally, you can simply activate your local `.venv` to avoid having to prepend `uv run` to your calls.
+
+
+#### Using a Job Scheduler
+
+Use this option if hardware access is managed by a scheduler, for example in typical enterprise computing clusters. In this project, we use Aixia's [AiQU](https://aixia.se/en/our-offer/ai-solutions-2/aiqu/) scheduler as an example to show how our framework can be used in this setting.
+
+##### AiQU Setup
+
+First, together with your AiQU administrator, make sure AiQU is correctly configured for your project. This includes the following points (web GUI available at e.g. `https://app.aiqu.ai/jobs`):
+
+1. You have queues defined, with the resources (GPU, storage) assigned as necessary. You can deploy a client or server node to each queue.
+2. The correct Docker registries are defined, so that AiQU knows where to look for your project Docker image (see below). For example, for pulling Docker images from projects on the AI Sweden's Gitlab instance, you should add `gitlab.mgmt.ai.se:5050/<your project group>`
+3. Make sure that any necessary data is added (and later mounted to the container, see `STORAGE_SOURCE`, `STORAGE_TARGET` variables below).
+
+##### Add a Dockerfile
+
+The NextGenFramework deployment system relies on Docker as a way to abstract your training logic from the actual hardware that will be running it. AiQU takes a Docker image as input and deploys it as a container, in an environment with the user-specified resources described above.
+
+AS the user, you are responsible for the optimization of your Dockerfile for speed and compatibility with your hardware / compute. There are however a couple of things to consider in terms of compatibility with NextGenFramework:
+
+1. You should define an environment variable `CMD` in your image that will ultimately be populated at runtime with your full training call, see the section and example below.
+2. In order to install custom dependencies (like NextGenFramework) in the image, you will need to authenticate `uv`. We look for build secrets `uv_username` and `uv_password`. In addition, `uv` requires some version tag for your code, which you can pass as a build argument (`VERSION`):
+
+    ```bash
+    docker build --secret id=uv_username,env=$UV_USERNAME --secret id=uv_password,env=$UV_PASSWORD --build-arg VERSION=... -f docker/Dockerfile .
+    ```
+
+For example, here are the last two stages of a mult-stage Docker build that implements this pattern and puts all application code and dependencies into the `/app` directory in the image. In this example, `nextgen_train` is the name of the project that uses NextGenFramework. To optimize the image itself, the Dockerfile first installs `uv`, then strictly project dependencies, followed by the project itself. The last stage simply copies the environment and source code into the final image:
+
+```Dockerfile
+# ---- STAGE 2: Builder -----------------------------------------------------------------
+FROM base AS builder
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Hatchling requires a version number to package / install with the code. 
+# Pass via --build-arg
+ARG VERSION=0.0.0
+
+# Install dependencies into .venv
+# Because of --no-install-project, this dependency layer will only invalidate 
+# when we install new dependencies, not change our source code
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=secret,id=uv_username \
+    --mount=type=secret,id=uv_password \
+    --mount=type=cache,target=/root/.cache/uv \
+    UV_INDEX_NEXTGEN_USERNAME=$(cat /run/secrets/uv_username) \
+    UV_INDEX_NEXTGEN_PASSWORD=$(cat /run/secrets/uv_password) \
+    uv sync --frozen --no-dev --group training --no-install-project
+
+# Install our project code
+COPY README.md LICENSE.md ./
+COPY ./scripts ./scripts
+COPY ./nextgen_train ./nextgen_train
+
+# `--no-editable`: installs our project dependency straight into `site-packages` 
+# = no messing around with env variables to find the package
+RUN --mount=type=secret,id=uv_username \
+    --mount=type=secret,id=uv_password \
+    --mount=type=cache,target=/root/.cache/uv \
+    UV_INDEX_NEXTGEN_USERNAME=$(cat /run/secrets/uv_username) \
+    UV_INDEX_NEXTGEN_PASSWORD=$(cat /run/secrets/uv_password) \
+    uv sync --frozen --no-dev --group training --no-editable
+
+
+# ---- STAGE 3: Production --------------------------------------------------------------
+FROM base AS production
+
+WORKDIR /app
+
+# Just need the environment and the source code!
+COPY --link --from=builder /app/.venv /app/.venv
+COPY --link --from=builder /app/scripts /app/scripts
+COPY --link --from=builder /app/nextgen_train /app/nextgen_train
+
+# Need to specify this placeholder for the runtime call!
+ENV CMD=""
+CMD exec $CMD
+```
+
+##### Deployment in CI
+
+Deploying a master or client node is all done through a CI workflow in Gitlab to ensure transparency and robustness. NextGenFramework provides some default templates that users can overrride and use to deploy nodes. To do that, add the following to the CI workflow in your project:
+
+Reference the NextGenFramework workflow templates:
+
+```yaml
+# Imports deployment jobs from the nextgen_framework
+# NOTE: whoever runs the pipeline must be granted at least a 'Reporter' role 
+# in the nextgen_framework project
+include:
+    # Change `nextgeninfra` to whatever group the repository belongs to in Gitlab
+  - project: 'nextgeninfra/nextgen_framework'
+    ref: 'main'
+    file: '/templates/aiqu.yml'
+```
+
+Make sure your pipeline has (at least) a `deploy` stage (usually as the last stage of the CI workflow):
+
+```yaml
+stages:
+  - test
+  - version
+  - build
+  - release
+  - deploy
+```
+
+Add a job to build and deploy your Docker image. If using Gitlab, you can use the default image registry in your repo for storage. Here is an example of how to build your Docker image using [buildx](https://github.com/docker/buildx). It uses your Docker registry as the Docker cache, rather than the local runner, a common pattern to optimize for space on shared runners. Note that we pass `uv` authentication as build secrets and versioning informaton as build arguments as specified above. This job creates and pushes your Docker image to a repository of your choice (if using Gitlab, by default the container registry in your repo), and tags it with a meaningful name (`$CI_REGISTRY_IMAGE:latest`). We will use this name to reference the image in the next step.
+
+```yaml
+# Build and push the Docker image to the GitLab Container Registry.
+# The two jobs are bundled here, because the image is too large for passing 
+# around as a .tar
+build-and-push-image:
+  stage: build
+  tags:
+    - shell
+  before_script:
+    # Login to the GitLab Container Registry using a short-lived, secure job token.
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_JOB_TOKEN" $CI_REGISTRY
+
+    # Generate the official BuildKit config to trust the internal CA cert    
+    - |
+      cat <<EOF > buildkitd.toml
+      [registry."gitlab.mgmt.ai.se:5050"]
+        ca=["${GIT_SSL_CAINFO}"]
+      EOF
+
+    # BUMPED_VERSION and/or APP_VERSION are set in a preceding job
+    - FINAL_VERSION=${BUMPED_VERSION:-$APP_VERSION}
+    - echo "Building Docker image with code version $FINAL_VERSION..."
+
+    # Spin up the shared builder and feed it the config file
+    - export BUILDER_NAME="nextgen-shared-builder"
+    - docker buildx inspect $BUILDER_NAME > /dev/null 2>&1 || docker buildx create --name $BUILDER_NAME --driver docker-container --config buildkitd.toml
+    - docker buildx use $BUILDER_NAME
+    - docker buildx inspect --bootstrap
+
+  script:
+    # Build the image and tag it securely
+    # NOTE: provenance metadata can mess with the Gitlab UI 
+    # -> turn off unless required!
+    - |
+      docker buildx build --push \
+        --provenance=false \
+        --secret id=internal_ca,src="${GIT_SSL_CAINFO}" \
+        --secret id=uv_username,env=UV_INDEX_NEXTGEN_USERNAME \
+        --secret id=uv_password,env=UV_INDEX_NEXTGEN_PASSWORD \
+        --build-arg VERSION="$FINAL_VERSION" \
+        --cache-from type=registry,ref="$CI_REGISTRY_IMAGE:buildcache" \
+        --cache-to type=registry,ref="$CI_REGISTRY_IMAGE:buildcache",mode=max \
+        -f docker/Dockerfile \
+        -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" \
+        -t "$CI_REGISTRY_IMAGE:latest" .
+        
+  after_script:
+    - echo "Cleaning up local runner ..."
+    - docker image prune -f
+    - docker builder prune -f
+
+```
+
+Add the deployment job with your default parameters. This job is a wrapper over a job called `.deploy-node`, made available by NextGenFramework. This is a job with manual deployment, with parameters that you can modify at runtime, or just hardcode them here. For the full list of parameters you can override here see `templates/aiqu.yaml`.
+
+```yaml
+# Wrapper over the deployment template at `templates/aiqu.yaml`
+deploy:
+  stage: deploy
+  extends: .deploy-node
+  variables:
+    # This points to the image tag built in the previous step!
+    IMAGE: $CI_PROJECT_PATH:$CI_COMMIT_SHORT_SHA
+    QID: 107
+    GPUS: 1
+    STORAGE_ID: 225
+    STORAGE_SOURCE: "/my/data"
+    STORAGE_TARGET: "/my/data"
+    # Mapped to MLFLOW_TRACKING_TOKEN internally
+    MLFLOW_API_TOKEN: "$CI_JOB_TOKEN"
+    # You can hardcode a specific default run here, or just 
+    # override it at runtime in UI!
+    CMD: "uv run python run_app.py framework/node=client ..."
+    ...
+```
+
+#### Training
+
+The training process is designed to be resilient to individual node failures. This is a big advantage of the "pull-only" architecture we use: for example, if a client node requires the next version of the global model to proceed with its local training, it will just continue querying the model repository until a model is made available and tagged with the expected version number. If the client fails for whatever reason, re-starting it will automatically figure out where it left off. The same applies to the server: if the server fails, re-starting it will first check if all requirements are met in order for it to pull all necessary client models, in which case it simply carries on where the global training left off.
+
+You can use this to your advantage to e.g. add more clients dynamically to the training. By default, the master node must know in advance how to many client nodes to expect before to launch an aggregation round:
+
+```bash
+uv run python ./scripts/run_nextgen.py framework/node=master framework.node.num_clients=2 run_name=my_run ...
+```
+
+However, new clients can be added "dynamically" by simply stopping the master node and restarting it with the updated client count, making sure to explicitly set the run name to that of the previous run, so it knows to continue where it left off:
+
+```bash
+uv run python ./scripts/run_nextgen.py framework/node=master framework.node.num_clients=3 run_name=my_run ...
+```

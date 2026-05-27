@@ -1,0 +1,22 @@
+This project was made possible through the collaboration, expertise, and support of our partners. We extend our special thanks to the following individuals:
+
+::: {layout="[[55, 2, 45]]"}
+
+::: {#first-column}
+{{< include _ai_sweden_list.qmd >}}
+:::
+
+::: {#second-column}
+
+:::
+
+
+::: {#third-column}
+{{< include _az_list.qmd >}}
+
+{{< include _funding_list.qmd >}}
+
+
+:::
+
+:::

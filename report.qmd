@@ -1,0 +1,134 @@
+---
+filters:
+  - inline.lua
+format: 
+  typst:
+    include-in-header: style.typ
+    include-before-body: layout.typ
+    font-paths: ["assets/fonts"]
+    papersize: a4
+    number-sections: false
+    toc: false
+    highlight-style: tango
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    page-layout: article
+    format-links: [pdf]
+    theme: 
+      light: minimal
+      dark: darkly
+    css: styles.css
+    csl: https://raw.githubusercontent.com/citation-style-language/styles/master/ieee.csl
+    bibliography: references.bib
+    highlight-style:
+      light: tango 
+      dark: dracula
+title-block-style: none
+link-citations: true
+---
+
+::: {.content-visible when-format="typst"}
+```{=typst}
+// The Title & Subtitle (Styled as raw text, invisible to the TOC)
+#text(size: 16pt, weight: "bold", fill: rgb("#555555"))[Next-Generation Infrastructure for Foundation Models]
+#v(0.5em)
+#text(size: 12pt, weight: "bold", fill: rgb("#777777"))[A Framework for Decentralized Learning with Heterogeneous Compute]
+
+#v(1em) 
+
+// The Author Block
+#grid(
+  columns: 2,
+  align: horizon,
+  gutter: 0.6em, 
+  box(
+    fill: luma(240), 
+    inset: (x: 10pt, y: 5pt), 
+    radius: 6pt, 
+    link("mailto:mauricio.munoz@ai.se")[*Mauricio Muñoz*]
+  ),
+  [Senior Research Engineer & Project Lead, AI Sweden | March 2026]
+)
+
+#v(1em) 
+#line(length: 100%, stroke: 1.2pt + luma(200)) 
+#v(1.0em)
+```
+:::
+
+::: {.content-visible when-format="html"}
+```{=html}
+<div style="margin-top: 1.2em; margin-bottom: 0.5em;">
+  <div style="font-size: 1.6em; font-weight: bold; color: #555555; line-height: 1.2;">
+    Next-Generation Infrastructure for Foundation Models
+  </div>
+  <div style="font-size: 1.2em; font-weight: bold; color: #777777; line-height: 1.2; margin-top: 1.5em;">
+    A Framework for Decentralized Learning with Heterogeneous Compute
+  </div>
+</div>
+
+<div style="margin-top: 2em;">
+  <div style="display: flex; align-items: center; gap: 0.6em; font-size: 0.95em;">
+    <div style="background-color: #f0f0f0; padding: 5px 10px; border-radius: 6px;">
+      <a href="mailto:mauricio.munoz@ai.se" style="font-weight: bold; text-decoration: none; color: inherit;">Mauricio Muñoz</a>
+    </div>
+    <div style="color: #555;">
+      Senior Research Engineer & Project Lead, AI Sweden | March 2026
+    </div>
+  </div>
+  
+  <div style="border-top: 1.5px solid #c8c8c8; margin-top: 1.2em; margin-bottom: 4em; width: 100%;"></div>
+</div>
+```
+:::
+
+## Executive Summary
+
+{{< include _summary.qmd >}}
+
+```{=typst}
+// Injects the Table of Contents directly into this spot
+#pagebreak()
+#outline(title: "Table of Contents", depth: 2)
+#pagebreak()
+```
+
+## 1. Introduction & Motivation
+
+{{< include _introduction.qmd >}}
+
+## 2. Project Partners
+
+{{< include _partners.qmd >}}
+
+## 3. Project Results Summary
+
+{{< include _results.qmd >}}
+
+## 4. The NextGen Framework (The Engineering Solution)
+
+{{< include _nextgen.qmd >}}
+
+## 5. Use-Case: RAG for Medical Leaflets (AstraZeneca)
+
+{{< include _pharma_rag.qmd >}}
+
+## 6. Conclusions
+
+{{< include _conclusions.qmd >}}
+
+## 7. Acknowledgements
+
+{{< include _acknowledgements.qmd >}}
+
+## 8. References
+
+{{< include _references.qmd >}}
+
+{{< pagebreak >}}
+
+## Appendix A: FL Strategies for Heterogeneous Compute 
+
+{{< include _appendix_fl.qmd >}}

@@ -1,0 +1,151 @@
+### Data
+
+We consider a variety of open-source sources for pharmaceutical data:
+
+- [EMA list of available medicines](https://www.ema.europa.eu/en/medicines/download-medicine-data) (ca. 2k), with each leaflet .pdf spanning 50-100 pages. The leaftlet content per medicine includes:
+
+    1. Summary of product characteristics
+    2. Manufacturer(s) responsible for batch release 
+    3. Conditions or restrictions regarding supply and use 
+    4. Other conditions and requirements of the marketing authorisation 
+    5. Conditions or restrictions with regards to the safe and effective use of the medical product 
+    6. Labelling and Package Leaflet (the focus for this project)
+
+- [OpenFDA](https://open.fda.gov/data/downloads/): *"an Elasticsearch-based API that serves public FDA data about nouns like drugs, devices, and foods. Each of these nouns has one or more categories, which serve unique data-such as data about recall enforcement reports, or about adverse events"*
+
+- [DailyMed](https://dailymed.nlm.nih.gov/dailymed/) database containing ~150,000 labeling for prescription and nonprescription drugs for human and animal use, submitted to the Food and Drug Administration (FDA) by companies.
+
+The embedding model is trained using contrastive learning (CL) approaches (see section below on understanding contrastive learning), which requires processing these raw datastes further. For example, when using mined hard negatives for CL, we explicitly generate `(anchor, positive, negative)` tuples for training. More details below.
+
+#### Negative Sampling Strategies
+
+A key difference between CL algorithms is how the set of negative (contrastive) pairs are built for a given dataset, specifically in order to compute gradients during training. We consider the following options:
+
+* **In-Batch Negatives**:  This method is the simplest. It takes pairs of questions and answers and uses other examples within the same batch as negative samples during training. It's efficient but may not always provide the hardest negatives.
+
+* **Pre-Mined Hard Negatives**: This method uses a dataset where difficult, semantically similar negatives have already been found in a separate processing step. This is often a very effective strategy, as it allows models to pick up on subtle semantic nuances that go beyond simple pattern matching of e.g. proper names.
+
+* **In-Document Negatives**:  This two-step workflow is for creating and training on negatives that are contextually relevant (i.e., from the same drug label). The first step of this process creates triplet samples on a per-document basis; the second step then trains with the pre-mined hard negatives approach above.
+
+Our experiments look at both in-batch negatives and pre-mined hard negatives. We preprocess and generate datasets for each modality as explained below.
+
+#### Processed datasets
+
+The processed datasets are hosted on Hugging Face for easy access and reproducibility. Each dataset is tailored to a specific type of negative sampling as follows.
+
+* **Mined Negatives QA**: [nicher92/mined_negatives_pharma_qa](https://huggingface.co/datasets/nicher92/mined_negatives_pharma_qa) -- This is the [DailyMed data](https://dailymed.nlm.nih.gov/dailymed/), parsed and structured with (pre-mined) hard negatives for training, totalling to about 2 million examples. Here is an example (note how the negative distractor explicity includes the drug name, also found in the anchor. An effective negative sampling strategy must distinguish between semantic and syntactic similarity between the texts, see section below for more info):
+
+::: {.list-indent}
+::: {layout-ncol="3"}
+
+::: {.custom-card .anchor-theme}
+**Anchor** [(Query)]{.subtext}
+
+---
+
+What adverse reactions were reported more commonly in patients taking [METFORMIN HYDROCHLORIDE]{.orange-badge} EXTENDED-RELEASE TABLETS compared to those taking a placebo?
+:::
+
+::: {.custom-card .positive-theme}
+**Positive** [(True Answer)]{.subtext}
+
+---
+
+..., adverse reaction rates observed in the clinical trials of a drug cannot be directly compared to rates in the clinical trials of another drug and may not reflect the rates observed in practice. In Metformin Hydrochloride Extended-Release Tablets In placebo-controlled trials, 781 patients were administered ....
+:::
+
+::: {.custom-card .negative-theme}
+**Negative** [(Distractor)]{.subtext}
+
+---
+
+[Metformin hydrochloride]{.orange-badge} extended-release tablets are contraindicated in patients with: • 2 [see Warnings and Precautions ( 5.1 • •
+:::
+
+:::
+:::
+
+* **Combined QA**: [nicher92/combined_pharma_qa](https://huggingface.co/datasets/nicher92/combined_pharma_qa) -- This data is used for in-batch negative training. It contains the positive pairs from the [EMA leaflets](https://www.ema.europa.eu/en/medicines/download-medicine-data), plus an additional ~1 million pharmaceutical related texts from [fineweb-edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu).
+
+The following details the step-by-step process for creating these datasets from their raw sources. Unless otherwise specified, scripts and helper functions for the steps below are provided in the [nextgen-train](https://gitlab.mgmt.ai.se/nextgeninfra/nextgen-train) repository.
+
+##### Workflow
+
+::: {.prompt-box}
+Data (XMLs, Parquet) 🠆 Generate Q&A 🠆 Combine 🠆 (Mine Negatives) 🠆 Training
+::::
+
+##### Step 1a: Download Raw Drug Data
+We provide a script to retrieve the raw prescription data from the DailyMed source. It creates and populates a desired output directory (default: `data/raw/dailymed_prescription/unzipped_data/`, see script for full configuration options) with thousands of XML files.
+
+```bash
+./scripts/data_processing/download_dailymed.sh
+```
+
+##### Step 1b: FineWeb-EDU Data Extraction
+
+From [HuggingFace](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu): *"FineWeb-Edu dataset consists of 1.3T tokens and 5.4T tokens (FineWeb-Edu-score-2) of educational web pages filtered from the FineWeb dataset"*. We use it in this project to supplement our existing pharmaceutical datasets with additional data. To achieve this we used a two-stage process:
+
+1. First, we used the EMA-leaflet corpus to construct a simple Okapi BM25-based filtering approach. This was used as an initial filter on the vast amount of data in Fineweb-EDU to restrict it to the subset that could plausibly be pharma-related. See `./scripts/data_processing/bm25.py`.
+
+2. Then, on this subset, we applied an active-learning based approach similar to LLM-as-a-judge:
+
+    Given an embedding model (example: [intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small)), we embed all texts in the subset. On these embeddings, we apply an active learning approach to iteratively discover relevant data. We use a linear support vector machine classifier, with an LLM acting as annotator:
+
+    Given a prompt such as (*"Does the document contain pharma-related questions and answers that are factual and informative? Answer YES/NO"*), we use the linear classifier judgement to sample informative samples from the filtered fw-edu data and let the LLM label the sampled data points.
+
+    Initially (when no labeled data points exists, or when all labeled data points have the same label) we sampled K random data points from the unlabeled set. When labeled data points exists for both classes, we sample points using a relaxed K-Means-simple margin method: Extract the N unlabeled data points closest to the separating hyperplane of the classifier, cluster them into K clusters using KMeans, and send the data point closest to the separating hyperplane in each cluster to the LLM to be labeled. As a consequence, for each round we label K new data points, and refit the linear classifier.
+
+    This process was then repeated until convergence of the linear classifier, and we filtered the data set based on its classification of all subset samples. The output of this process is a `.parquet` file with the additional data samples.
+
+Notes:
+
+- The active learning setup (developed independently from this project) is packaged as a [general purpose libary](https://github.com/Apsod/autoclassifier).
+
+- Embeddings were computed using HuggingFace text embedding inference: [text-embeddings-inference](https://github.com/huggingface/text-embeddings-inference).
+
+- In `./scripts/data_processing/bm25.py`, the `fw.pkl` and `pharma.pkl` are BM25-stats objects computed based on fineweb-edu and the EMU-documents respectively, using the aggregatator objects found in the script.
+
+
+##### Step 2: Parse XML into a Clean JSONL File
+This step converts the XML files from Step 1a into a simple, structured format. This creates the file `data/processed/parsed_drug_data_recursive.jsonl`.
+
+```bash
+python ./scripts/data_processing/process_dl_data.py
+```
+
+##### Step 3: Generate Questions from Source Texts
+This script uses an LLM to generate question-answer pairs from our two source files produced in the previous steps. This creates `generated_questions_to_data.jsonl` and `generated_questions_from_parquet.jsonl`.
+
+From DailyMed:
+
+```bash
+python ./scripts/data_processing/generate_questions.py \
+    --input_file data/processed/parsed_drug_data_recursive.jsonl \
+    --output_file data/processed/generated_questions_to_data.jsonl \
+    --data_type jsonl
+```
+From Fine Web (see Step 1b):
+
+```bash
+python ./scripts/data_processing/generate_questions.py \
+    --input_file data/raw/fwdata.parquet \
+    --output_file data/processed/generated_questions_from_parquet.jsonl \
+    --data_type parquet
+```
+
+##### Step 4: Combine Datasets
+This script merges the two generated QA datasets into a single, unified dataset, creating the `data/processed/combined_questions_answers/` directory.
+
+```bash
+python ./scripts/data_processing/combine_datasets.py
+```
+
+##### Step 5: Mine Hard Negatives
+This final step creates a specialized dataset with challenging negative examples for advanced training. This creates the `data/processed/mined_negatives/` directory.
+
+```bash
+python ./scripts/data_processing/mine_hard_negatives.py
+```
+
+

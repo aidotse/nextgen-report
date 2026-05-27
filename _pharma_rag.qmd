@@ -1,0 +1,13 @@
+Please also refer to [nextgen-train](https://gitlab.mgmt.ai.se/nextgeninfra/nextgen-train), which implements the concepts and experiments introduced in this section. The repository is also available as supplementary material to this report.
+
+{{< include _pharma_use_case.qmd >}}
+
+{{< include _pharma_data.qmd >}}
+
+{{< include _pharma_training.qmd >}}
+
+{{< include _pharma_eval.qmd >}}
+
+{{< include _pharma_results.qmd >}}
+
+{{< include _pharma_contrastive.qmd >}}

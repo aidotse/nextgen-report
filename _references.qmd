@@ -1,0 +1,11 @@
+::: {.content-visible when-format="html"}
+::: {#refs}
+:::
+:::
+
+::: {.content-visible when-format="typst"}
+```{=typst}
+// Force Typst to print the bibliography, but suppress its default Level 1 header
+#bibliography("references.bib", title: none)
+```
+:::

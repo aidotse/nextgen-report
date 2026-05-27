@@ -1,0 +1,10 @@
+Please also refer to [nextgen-framework](https://gitlab.mgmt.ai.se/nextgeninfra/nextgen_framework), which implements the concepts introduced in this section as a Python software package. The repository is also available as supplementary material to this report.
+
+{{< include _nextgen_architecture.qmd >}}
+
+{{< include _nextgen_usage.qmd >}}
+
+{{< include _nextgen_limitations.qmd >}}
+
+{{< include _nextgen_flower.qmd >}}
+

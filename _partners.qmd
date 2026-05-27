@@ -1,0 +1,27 @@
+The project partnership includes infrastructure leaders (Aixia, Intel, NetApp, Proact) and product innovators (AstraZeneca, Zenseact) with a common interest in applications of large language models and their specialization for specific use cases across heterogeneous infrastructure environments. Cross-industry learning (i.e. across the product innovators) was not the goal of the project - rather, the idea was to focus on decentralized learning as means to deal with data residency restrictions across geographic silos within the respective companies themselves or their collaborators.
+
+#### AstraZeneca
+
+In addition to strengthening the project team with AI engineering and research expertise, AstraZeneca provided the project with the main use case at the center of the project's experiments. This use case focuses on specializing LLM capabilites for factual pharmaceutical data retrieval from medicinal databases in the form of a RAG system (details are the discussed in the following sections below). Efforts were coordinated to validate the use case against internal company objectives and procure usable data for experimentation in this project. More specifically, AstraZeneca assumed ownership of the second part of the experimentation pipeline, namely integrating and testing the downstream language (chat) model as part of the RAG setup on the holdout evaluation dataset that was used to produce the results reported here.
+
+#### Zenseact
+
+Zenseact entered this project with a strong use case focused on finetuning of large language models for automotive requirements engineering. Unlike the use case specification by AstraZeneca, the focus here was not on retrieval capabilities, but rather on finetuning of generalist models for the purposes of improving in-domain (i.e. automotive) reasoning abilities, and thus serve as a tool for the efficient refactoring and automated engineering of automotive-grade requirement specifications. The main efforts here were geared toward securing the release of company-internal requirement data in order to guarantee that whatever model was used for training was not already pre-trained on it. Securing this release was not possible for the scope of this project, and as no (sufficient) proxy data to take its place was available, Zenseact assumed an advisory role for the latter part of the project, providing guidance for the architectural design of the framework, and continuing to push for its generalizablity across industries and use cases.
+
+#### Aixia
+
+Aixia's scheduling system, AiQU, was leveraged by the project as a software asset through which several key experiments were run and deployment scenarios were tested. In particular, this allowed the project to test the viability of connecting federated learning clients sitting behind a job scheduling management system via our framework's main orchestration pattern. This translates to a fundamental requirement that our framework should fulfill, since schedulers are the de facto standard interface for large industrial compute clusters. Besides providing ongoing software support, Aixia led investigations on adding novel compute like Intel's Gaudi 2s into the scheduling system.
+
+#### Intel
+
+This project's clear focus was on the heterogenous compute scenario for federated learning, and this would certainly not have materialized without Intel providing Gaudi 2 HPUs to the mix of available compute that this project had access to. Efforts included coordinating with AI Sweden's own infrastructure team to maintain and install the units into our own lab environment, as well as providing guidance and software support for their use throughout the project, as their architecture is inherently different from commonplace GPU architectures.
+
+#### NetApp
+
+Storage management and optimization is a big part of this demonstrator. Though the intended deployment for this project assumes completely isolated storage systems and solutions between actors, NetApp contributed to the speed and flexibility of getting our experiments running by implementing a storage system at the Linköping site that enabled the physically distributed setup of compute that lies at the core of this project.
+
+
+#### Proact
+
+Proact provided the know-how for setting up additional storage solutions, and specifically investigated an additional methodology / tool for sharing data efficiently between sites, called [FlexCache](https://www.netapp.com/data-storage/what-is-flex-cache/). Though this was not leveraged in the final demonstrator due to the relatively small dataset sizes that were available for this project, this option nevertheless remains a good and useful feature for handling data inside e.g. large, geographically distributed organizations, in particular for the purpose of running large, decentralized training runs in heterogenous infrastructure environments.
+

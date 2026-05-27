@@ -1,0 +1,798 @@
+::: {.content-visible when-format="typst"}
+```{=typst}
+#v(1.5em) 
+
+#grid(
+  columns: 2,
+  align: horizon,
+  gutter: 0.6em, // The exact spacing between the bubble and the first pipe "|"
+  box(
+    fill: luma(240), 
+    inset: (x: 10pt, y: 5pt), 
+    radius: 6pt, 
+    link("https://www.linkedin.com/in/rasmusmarak/")[*Rasmus Maråk*]
+  ),
+  [ML Engineer, AI Sweden]
+)
+
+
+#v(1em) 
+
+#line(length: 100%, stroke: 1.2pt + luma(200)) 
+
+#v(1.5em)
+```
+:::
+
+::: {.content-visible when-format="html"}
+```{=html}
+<div style="margin-top: 2em;">
+  <div style="display: flex; align-items: center; gap: 0.6em; font-size: 0.95em;">
+    <div style="background-color: #f0f0f0; padding: 5px 10px; border-radius: 6px;">
+      <a href="https://www.linkedin.com/in/rasmusmarak/" style="font-weight: bold; text-decoration: none; color: inherit;">Rasmus Maråk</a>
+    </div>
+    <div style="color: #555;">
+      ML Engineer, AI Sweden
+    </div>
+  </div>
+  
+  <div style="border-top: 1.5px solid #c8c8c8; margin-top: 1.2em; margin-bottom: 4em; width: 100%;"></div>
+</div>
+```
+:::
+
+
+
+### Abstract 
+
+The rapid development of Large Language Models (LLMs) has transformed how organizations define operations, value chains and business models, but it has also intensified challenges related to data privacy, security, compute requirements, and collaboration across institutional boundaries. Federated Learning (FL) offers a promising alternative for training and fine-tuning LLMs without centralizing sensitive data, allowing participants to contribute to shared model
+development while retaining full control over their datasets.
+
+This report provides a brief survey on how Federated Learning can be applied to LLMs in the context of the Next Generation Infrastructure (NextGen) project. The project aims to build a future-proof, decentralized infrastructure for foundation model fine-tuning by leveraging heterogeneous compute resources contributed by industrial partners such as Intel and Aixia. Central to this effort is the use of a flexible orchestrator, a scalable experiment-tracking system, and communication-efficient algorithms.
+
+The report begins with an introduction to the core principles of Federated Learning, followed by a discussion of the unique challenges and opportunities arising when applying FL to LLMs—particularly related to communication costs, model size, and hardware diversity. We then outline the motivation and scope of the NextGen project, highlighting its decentralized architecture and its ambition to support foundation model fine-tuning across multiple organizations.
+A brief survey compares leading FL orchestration frameworks, including Flower, FedML, and OpenFL, with a particular emphasis on their suitability for heterogeneous compute
+environments. The report also examines MLflow as the experiment-tracking backbone for NextGen, detailing how it supports reproducibility, versioning, and distributed orchestration.
+
+Finally, the report surveys a number of current state-of-art Federated Learning algorithms, providing participating project stakeholders guidance on choosing among them based on system heterogeneity, communication constraints, and scalability requirements. The report concludes with recommended architectures and strategic directions to support privacy-preserving, collaborative AI development within the defined context.
+
+### Introduction
+
+Foundation models have rapidly advanced over the past few years, becoming a core component across research, development, and operations. They now power applications in natural language processing, information retrieval, conversational systems, and semantic understanding, enabling greater capabilities across industry, academia, and the public sector.
+
+While most public attention focuses on decoder-based Large Language Models such as GPT-style transformers (Radford et al., 2018; Brown et al., 2020; Touvron et al., 2023), an equally important class of models relies on encoder-only architectures. These models play a critical role in practical machine-learning workflows and are widely deployed in production systems. Examples include BERT (Devlin et al., 2018), RoBERTa (Liu et al., 2019), DeBERTa (He et al., 2021), MiniLM (Wang et al., 2020), and the family of Sentence-Transformers (Reimers & Gurevych, 2019), which produce semantically meaningful embeddings for sentences and documents.
+
+As these models continue to grow, training and fine-tuning remain resource-intensive tasks that often require large datasets and significant high-performance computing infrastructure. Centralized training pipelines therefore face substantial challenges, including high computational costs, data-governance restrictions, legal and security constraints, and the inability to share sensitive datasets across organizational boundaries. As these constraints become more prominent, new approaches are required to enable collaboration without compromising privacy, legal requirements, or data ownership. Federated Learning (FL) offers a compelling solution by enabling organizations to collaboratively train a shared model while keeping all data local. Instead of sharing raw data, participants exchange model weights or gradients, which are
+aggregated either by a central server or in a peer-to-peer manner. We refer to the former as centralized FL and the latter as decentralized FL. Both paradigms preserve data privacy, support multi-party collaboration, and make more efficient use of distributed compute resources. When applied to larger models, FL introduces several technical challenges. Decoder-based LLMs often contain billions of parameters and require specialized hardware, making communication overhead, latency, system heterogeneity, and stable model convergence critical issues. These challenges are amplified in real-world federations, which typically involve diverse compute
+stacks and non-IID datasets. As a result, current research emphasizes communication-efficient fine-tuning strategies, parameter-efficient methods, and robust aggregation techniques tailored for large models.
+
+The Next Generation Infrastructure (NextGen) project aims to evaluate and develop the infrastructure needed to enable federated fine-tuning of foundation models across heterogeneous compute. While the long-term ambition includes federated fine-tuning of larger decoder-only models, the project begins by evaluating an encoder-only sentence-transformer, using safetensors to store PEFT-based adapter weights. This offers rapid experimentation, lower communication overhead, and wider participation across varying hardware configurations. By orchestrating decentralized learning across isolated compute stacks, the project aims to accelerate Sweden’s capabilities in foundation-model development—strengthening data sovereignty and enabling new forms of collaboration and innovation. This report contributes to that effort by:
+
+  - Introducing the principles of Federated Learning,
+  - Presenting the challenges of applying FL to LLMs,
+  - Presenting the scope and technological context of the project,
+  - Comparing state-of-the-art orchestration frameworks,
+  - Comparing suitable FL algorithms for LLM fine-tuning, and
+  - Proposing architectural recommendations for the given context.
+
+
+### Chapter 1. Federated Learning Concepts and Foundations
+
+Federated Learning (FL) is a distributed machine learning paradigm designed to enable multiple participants—such as organizations, devices, or compute nodes—to collaboratively train a shared model without exchanging their local data. Instead, FL coordinates training by iteratively aggregating local model updates, thereby improving privacy, security, and data sovereignty. This section introduces the foundational concepts of FL and outlines the benefits, challenges, and practical considerations that guide its deployment for both Large Language Models (LLMs) and encoder-only models in particular, such as sentence-transformers.
+
+#### 1.1 What is Federated Learning?
+
+In traditional machine-learning workflows, data must first be collected, filtered, and centralized before model training can begin. This is increasingly incompatible with organizational policies, regulations and the operational realities of internal pipelines and logistics. Federated Learning redefines this workflow by decentralizing the training process. A typical FL cycle follows these steps:
+
+1. Initial Model Distribution – A global model is sent from the orchestrator to clients.
+2. Local Training – Each client fine-tunes the model using its local dataset.
+3. Update Transmission – Clients send model updates (e.g., gradients, weights, adapters) back to the orchestrator.
+4. Aggregation – The orchestrator aggregates the updates (e.g. by weighted averaging) to produce a new global model containing local insights.
+5. Iteration – The process repeats until a certain convergence criteria is met.
+  
+Depending on how data is distributed across clients, FL is often categorized into three variants:
+
+- **Horizontal FL** – Clients share the same feature space but have different samples. This is most relevant for cross-organization LLM fine-tuning.
+- **Vertical FL** – Clients share different features of the same population.
+- **Federated Transfer Learning** – Used when both features and samples differ significantly between clients.
+
+  ![Two common data partition structures for federated learning. (Source: [https://doi.org/10.48550/arXiv.2107.03428](https://doi.org/10.48550/arXiv.2107.03428))](assets/fl.png)
+
+In this report, we focus primarily on horizontal FL.
+
+#### 1.2 Benefits of Federated Learning
+
+FL provides several advantages that make it attractive for collaborative fine-tuning:
+
+- **Privacy Preservation:** Raw data never leaves the local environment, aligning with GDPR and internal governance requirements.
+- **Data Sovereignty:** Organizations maintain full control of sensitive datasets.
+- **Collaboration Across Institutions:** Organizations benefit from each other’s data without compromising confidentiality.
+- **Improved Generalization:** Combining locally diverse datasets often yields models that generalize better.
+- **Scalability Through Distributed Compute:** Training is parallelized across multiple clients, increasing throughput and utilization.
+- **Reduced Data Transfer Costs:** Only model updates—not raw data—are exchanged.
+
+#### 1.3 Challenges of Federated Learning
+
+Despite its benefits, FL introduces unique challenges that must be addressed before deployment, particularly for foundation models.
+
+- **Statistical Heterogeneity (Non-IID Data)**: Client datasets often differ in distribution. This can lead to unstable updates, slower convergence and client drift often due to the sensitivity of autoregressive training objectives, especially in decoder-only models. Algorithms such as FedProx, Scaffold, or FedOpt often mitigate these issues.
+- **System Heterogeneity**: Clients differ in compute power, GPU vendor, network speeds, memory capacity, and reliability. These differences are especially disruptive for LLMs due to their large memory footprint and high bandwidth requirements. Encoder-only models ease some of these constraints thanks to their smaller size and faster iteration cycles.
+- **Communication Bottlenecks**: LLMs may contain billions of parameters, making naïve transmission of full model updates impractical. Encoder-only models reduce this burden dramatically, but for both families, communication-efficient methods such as model compression, quantization, sparsification, adapter-only transmission and PEFT (e.g., LoRA/QLoRA) are essential.
+- **Security and Privacy Threats**: Even when raw data is not shared, model updates may leak sensitive information through model inversion attacks, membership inference and poisoning attacks. Secure aggregation, differential privacy, and robust aggregation strategies provide important countermeasures.
+- **Orchestration and Experiment Tracking Complexity**: Distributed training requires coordinated orchestration across clients, efficient model-checkpoint versioning, and detailed metric logging. Frameworks such as Flower and experiment-tracking systems like MLflow are essential components in managing federated workflows.
+
+#### 1.4 Summary
+
+FL provides the conceptual foundation for decentralized model development while addressing concerns around privacy, data governance, and cross-organizational collaboration. However, deploying FL for foundation models requires careful management of communication costs, systems heterogeneity, and security. These concerns are especially pronounced for decoder-only LLMs, but remain relevant for encoder-only architectures too, albeit at a more manageable scale. These dynamics motivate the design goals of the NextGen project, aiming to explore federated fine-tuning across heterogeneous compute.
+
+
+#### 2. Federated Learning for LLMs
+
+LLMs have become foundational components in modern AI systems, enabling state-of-the-art performance across tasks such as text generation, summarization, question answering, and multimodal reasoning. Their growing adoption, however, introduces challenges for decentralized training due to their massive scale, memory requirements, and sensitivity to heterogeneous data distributions. This section outlines how FL intersects with LLM fine-tuning, the challenges it presents, and the opportunities it creates for collaborative, privacy-preserving development. 
+
+#### 2.1 Introduction
+
+The literature on federated foundation models is expanding rapidly. Several lines of research survey core issues related to privacy in federated LLM training (e.g., Chen et al., 2023; Yu et al., 2023), while others focus on communication efficiency through model compression, sparsification, and quantization (Woisetschläger et al., 2024). Broader analyses of foundation-model trends (Zhuang et al., 2023) highlight motivations and emerging design patterns but provide less emphasis on FL specifically. A recent and comprehensive survey by Yao et al. (2024) synthesizes research spanning fine-tuning, prompt-based methods, privacy, efficiency, and future directions, offering valuable context for both LLM-oriented and encoder-only federated workflows.
+
+| Area | Topic | Approaches |
+| :--- | :--- | :--- |
+| Heterogeneity | Data Heterogeneity | FedDAT, RaFFM, FedKC, FEDSA |
+| | Model Heterogeneity | FedLoRA, HETLORA, FlexLoRA, FedPCL, FedBRB |
+| | -------------------------------- | ------------------------------------------- |
+| | Security and Robustness | FedSecAgg, FedDefend, FedRobust |
+| Privacy and Security | Privacy | FedPIT, FFA-LORA |
+| | Attacks | Decepticon |
+| | Defense | FEDML-HE, FedBiOT |
+| | -------------------------------- | ------------------------------------------- |
+| | Training Efficiency | Grouper, FedYolo, FedTune, FedMeZO |
+| Efficiency | Communication Efficiency | CEFHRI, FedKSeed, FedRDMA, FedPETuning |
+| | Parameter Efficiency | SLORA, FFA-LORA, FlexLORA, LP-FL, FedBiOT |
+| | -------------------------------- | ------------------------------------------- |
+| | Cross-Silo | FedRDMA, CROSSLM |
+| | Cross-Device | FwdLLM |
+| Frameworks | Decentralized Training | OpenFedLLM |
+| | Blackbox and Transfer Learning | Fed-BBPL, ZooPFL |
+| | Instruction Tuning | FederatedScope-LLM, FedIT |
+| | -------------------------------- | ------------------------------------------- |
+| | Datasets | FederatedScope-LLM, OpenFedLLM |
+| Evaluation | Benchmarks | FedLLM-Bench, Fedmlsecurity, Profit |
+| | Convergence Analysis | FedPEAT, FedMeZO |
+
+
+Today, fine-tuning remains one of the most practical and active areas of study, where the table above overviews current topics and approaches. Federated adaptations of LLM pipelines such as OpenFedLLM (Ye et al., 2024), FusionAI (Tang et al., 2023), and decentralized scheduling methods (Yuan et al., 2022) demonstrate how federated and semi-federated training can leverage distributed compute, including weaker or consumer-grade devices, fine-tuning LLaMA-family models across clients with standard aggregation techniques (including FedAvg, FedProx and FedAdam) while outperforming purely local training. While much of this work focuses on decoder-only LLMs, encoder-only models—particularly sentence-transformers—have also been explored in federated contexts, benefiting from lower memory footprint, more stable optimization, and far smaller communication requirements. These qualities make them well-suited as initial evaluation models for federated infrastructure, as in this project.
+
+#### 2.2 Why FL for LLMs is Challenging
+
+Training or fine-tuning LLMs in a federated environment is significantly more complex than doing so for smaller deep-learning models. Key challenges include:
+
+- **Model Size and Memory Requirements**: Modern decoder-only LLMs commonly range from hundreds of millions to tens of billions of parameters, typically requiring substantial GPU memory. This limits how many clients that can participate in FL and increases the risk of stragglers. In contrast, encoder-only models such as BERT-base (110M) or MiniLM (33M) are typically smaller, making them more accessible for federated fine-tuning.
+- **Communication Overhead**: A single communication round for a multi-billion-parameter model may require hundreds of megabytes, even after quantization. Communication quickly becomes the bottleneck. Encoder-only models drastically reduce this overhead, especially when only LoRA/PEFT adapters (a few MB) are transmitted.
+- **Compute Heterogeneity**: Federated LLM setups must handle clients equipped with very different hardware—NVIDIA, AMD, and Intel GPUs as well as CPUs. Load balancing and fairness in contribution remain open research challenges.
+- **Statistical Heterogeneity (Non-IID Data)**: LLMs are notoriously sensitive to variations in vocabulary, writing style, or domain. Updates produced on highly domain-specific datasets can diverge significantly. Encoder-only models exhibit more stable gradients under contrastive or siamese losses, reducing (but not eliminating) drift concerns.
+- **Robustness and Security**: Because LLMs capture detailed semantic patterns, updates may leak sensitive information through inversion or membership-inference attacks. These risks apply to encoder-only models as well, but the smaller update sizes and simpler architectures can make mitigation more tractable.
+
+#### 2.3 Parameter- and Communication-Efficient Fine-Tuning
+
+To make federated LLM fine-tuning feasible, substantial effort has focused on reducing communication and memory costs:
+
+- **Parameter-Efficient Fine-Tuning (PEFT)**: Techniques such as LoRA, QLoRA, adapters, and low-rank update layers allow clients to update only a small portion of the model while keeping the base frozen, reducing memory footprint, compute requirements and communication cost. PEFT is particularly powerful for both LLMs and sentence-transformers, where weights may be stored in safetensors.
+- **Model Compression and Quantization**: 4-bit and 8-bit quantization, gradient sparsification, low-rank adapter updates (e.g. LoRA-style PEFT), and low-communication schemes such as OpenDiLoCo reduce communication volume and enable training on weaker hardware.
+- **Decentralized and Peer-to-Peer Variants**: Frameworks such as OpenFedLLM, FusionAI, and decentralized scheduling proposals allow training without a central server or with dynamic coordination among heterogeneous devices. 
+
+Together, these strategies make federated LLM fine-tuning increasingly practical.
+
+#### 2.4 Current Research Landscape
+
+Recent research in federated LLMs spans multiple directions:
+
+- Privacy and leakage mitigation, including secure aggregation, differential privacy, and inversion-resistant updates.
+- Communication efficiency, via quantization, sparsification, compression, and PEFT.
+- Robust aggregation and optimization, addressing drift and instability under heterogeneous client behavior.
+- Decentralized training paradigms leveraging underutilized GPU clusters or consumer devices.
+- Prompt-based FL, enabling collaboration without exchanging full model parameters.
+
+This ongoing research provides the foundation for the architectural strategy used in NextGen.
+
+#### 2.5 Summary
+
+Federated Learning for LLMs is a rapidly evolving field driven by the need to balance performance, privacy, and practicality. Decoder-only LLMs remain challenging due to their scale and sensitivity, but emerging PEFT and compression methods make federated fine-tuning increasingly viable. Encoder-only architectures, such as sentence-transformers, relax many of these constraints and are therefore reasonable for evaluating federated training infrastructure. With diverse compute resources contributed under NextGen and AI Sweden coordinating a flexible and extensible orchestration, the project is well-positioned to advance Sweden’s capabilities in collaborative foundation-model development.
+
+#### 3. Fine-tuning on Heterogeneous Compute
+
+One of the central challenges in federated foundation-model development is the strong heterogeneity of compute environments across participating organizations. In practice, clients differ in GPU vendors, GPU memory capacity, interconnect bandwidth, driver support, software stacks, and even operating-system constraints. FL must therefore provide a training strategy that remains robust and efficient under these differences, without assuming a homogeneous cluster. This challenge becomes particularly pronounced for decoder-only LLMs, where fine-tuning typically requires large accelerators such as the NVIDIA H100, or high-end AMD/Intel alternatives. In contrast, encoder-only architectures are significantly easier to deploy across heterogeneous environments and well-suited as a first evaluation target for infrastructural development. This section outlines the challenges and considerations associated with fine-tuning foundation models across heterogeneous compute, spanning both conventional LLMs and encoder-only models.
+
+#### 3.1 Hardware Diversity Across Clients
+
+In real-world FL settings, participating actors or organizations rarely operate identical hardware. Instead, clients may include vendors and configurations such as:
+
+- Nvidia GPUs (e.g. H100/A100/L4 etc) using CUDA.
+- AMD GPUs (e.g.W7900) using ROCm wheels.
+- Intel Accelerators, such as Gaudi.
+- CPU-only nodes, often found in legacy systems.
+- Cloud VMs or on-prem clusters with varying driver constraints.
+
+LLMs generally require substantial GPU memory, making CPU-only or small-memory GPUs impractical without quantization or PEFT. Encoder-only models, however, are better suited to fit on more modest hardware, enabling wider participation. This discrepancy directly affects federation participation rates, fairness, and execution time. In particular,
+
+- Some clients may complete local training faster than others.
+- Some may only support quantized checkpoints or adapters.
+- Some may default to CPU execution when GPU backends are unavailable.
+
+A practical FL system must therefore anticipate these variations, rather than treat them as an exception. Employing strategies such as asynchronous or synchronous aggregation, among others.
+
+#### 3.2 Software Stack Fragmentation
+
+Hardware heterogeneity is also compounded by variations in software across stacks, examples include the challenges that arise between:
+
+- CUDA, ROCm and oneAPI.
+- Different PyTorch wheels and kernel support.
+- Dependency differences around tokenizer libraries, safe tensors and model-loading routines.
+- And optional transformer acceleration libraries (TensorRT-LLM, DeepSpeed, etc).
+
+For LLMs, these differences can affect numerical behavior, memory layout, tensor-core utilization, and even model correctness. For encoder-only models, the sensitivity is lower but still meaningful. For instance, tokenizers must be consistent across clients, and inference-time optimizations must not alter gradient behavior. A common mitigation is to enforce container-based execution, where each client runs the same Docker image but uses hardware-specific packages at runtime.
+
+#### 3.3 Model Size and Memory Constraints
+
+Memory constraints constitute a defining limitation for federated LLMs. For a typical 7B-parameter decoder model, the raw parameter storage alone may require, for instance:
+
+- ~14–16 GB GPU memory in 16-bit precision,
+- ~7–8 GB using 8-bit quantization,
+- ~3–4 GB using 4-bit quantization (as in QLoRA),
+
+while end-to-end training can require substantially more memory once optimizer states and activations are included. Encoder-only models such as MPNet, MiniLM, or sentence-transformers (110–300M parameters) require an order of magnitude less memory, even during training. This allows
+
+- more clients to participate,
+- faster iteration cycles,
+- reduced need for quantization
+- and lower risk of out-of-memory dependent failures.
+
+For FL, this directly improves convergence as fewer clients drop out or produce inconsistent updates due to memory limits.
+
+#### 3.4 Communication Constraints
+
+Communication is consistently the bottleneck for federated LLM training. A full set of 7B model parameters in 16-bit precision may reach around 14 GB, far exceeding the bandwidth available in typical enterprise networks. Even with LoRA or QLoRA, adapter updates for large models may still reach tens or hundreds of megabytes if many layers are adapted. Encoder-only models, again, relax these constraints. A LoRA adapter for a sentence-transformer can be as small as 1–10 MB, enabling faster communication rounds, more frequent aggregation, lower variance across updates and better utilization of slower networks. Thus, this difference is a major motivation to begin with a more lightweight encoder-only model, enabling robust experimentation without the same level of bottlenecks.
+
+In either case, it is still important to acknowledge network heterogeneities across clients, including varying bandwidths, latency differences between on-premises data centers as well as VPN and firewall constraints constricting to workflow.
+
+#### 3.5 Differences in Training Objectives
+
+Decoder-only LLMs typically use autoregressive objectives, predicting the next token given the previous ones. These objectives can be sensitive to dataset imbalance, stylistic differences, domain shifts and token distribution differences. Under non-IID data, local gradients may therefore drift significantly, amplifying instability across federated updates and the global optimization trajectory. However, encoder-only models, particularly sentence-transformers, use contrastive losses, cosine-similarity objectives, siamese network and triplet losses. These losses generally produce smoother, more stable gradients across heterogeneous data, making them more tolerant of client-specific variations.
+
+Thus, this difference significantly influences the aggregation algorithms of choice, where 
+
+- FedAvg can become unstable or converge slowly when applied to large decoder-only LLMs under strong non-IID data and heterogeneous compute, while encoder-only models trained with contrastive objectives tend to remain more stable.
+- FedProx stabilizes both model families, but is especially beneficial for LLMs.
+- FedOpt (e.g., FedAdam/FedYogi) is more widely effective for both. 
+
+The discussion on appropriate algorithms for aggregation continues in Chapter III.
+
+#### 3.6 Resource-Aware Local Fine-Tuning
+
+In heterogeneous compute environments, the training strategy must adapt dynamically to client capabilities. Several techniques may help to accommodate this:
+
+- **Quantization-Aware Fine-Tuning**: Using 4-bit quantization (QLoRA) enables participation of constrained GPUs for both LLMs and encoder-only models.
+- **Low-Rank Adaptation (LoRA)**: LoRA limits the number of trainable parameters, enabling consistent updates even from weaker hardware.
+- **Skipping GPU-Intensive Layers**: Some FL frameworks allow partial fine-tuning, updating only selected layers or modules. This is more feasible for encoder-only models due to their smaller size.
+- **Dynamic Batch Size / Gradient Accumulation**: Clients can adjust their batch size based on available memory without affecting global correctness.
+
+#### 3.7 Additional Challenges
+
+In addition to the constraints presented in previous sections, other challenges include:
+
+1. **Stragglers** Clients with slower hardware or lower bandwidth delay aggregation rounds.
+    This leads to:
+    - Wasted compute on fast clients
+    - Lower overall throughput
+    - Possible divergence if slow clients produce outdated gradients
+
+2. **Unbalanced contribution** Faster clients may perform more local training steps than slower ones, causing:
+    - Bias in the global model
+    - Instability during aggregation
+    - Reduced fairness across participants
+
+3. **Inconsistent numerics** Variance introduced by:
+    - FP16 vs BF16 vs FP32 support
+    - Different GPU architectures
+    - Quantization availability
+    This can affect convergence and gradient alignment.
+
+4. **Deployment complexity** Different drivers and runtimes require:
+    - Custom Docker images per client
+    - Version-aware model builds (e.g., different Torch wheels for ROCm vs CUDA)
+    - Automated environment detection
+
+5. **Communication overload** Clients with slower network links struggle to transfer:
+    - Full model checkpoints
+    - Large LoRA adapter matrices
+    - Training logs and metrics
+    For LLM-scale models, even sending LoRA deltas can strain weak links.
+
+To mitigate some of these challenges, one alternative is to use adaptive client selection where clients may be filtered based on hardware capability, sampled proportionally to speed and adaptively excluded if unstable, preventing blockage. Another strategy includes variable local training workloads, where faster clients may run more local epochs or larger batches while slower clients contribute with proportionate updates. Aggregation techniques such as FedProx and FedOpt can be suitable for compensating this imbalance.
+
+#### 3.8 Commercial Benefits
+
+Despite challenges, heterogeneous compute also offers significant advantages, including: 
+
+- **Maximizing available compute**: Organizations often have underutilized GPUs or smaller clusters. FL enables these resources to contribute meaningfully without investing in new centralized infrastructure.
+- **Cost efficiency**: FL shifts central training cost to many distributed contributors:
+  - Lower energy concentration
+  - Lower infrastructure expenses
+  - Reduced need for large central GPU nodes
+- **Robustness and flexibility**: A system that can orchestrate training across mixed GPU architectures and speeds is more resilient and adaptable, supporting:
+  - Future hardware generations
+  - Cross-vendor procurement
+  - Opportunistic compute use
+
+#### 3.9 Summary
+
+Fine-tuning foundation models across heterogeneous compute introduces challenges spanning hardware diversity, memory constraints, communication, and optimization behavior. These challenges are significantly more severe for decoder-only LLMs, whose scale and sensitivity demand advanced PEFT, quantization, and adaptive FL algorithms. Encoder-only models, such as sentence-transformers, offer a more forgiving environment for early experimentation due to their lower memory footprint, faster convergence, and stable optimization objectives. For these reasons, NextGen focuses on a sentence-transformer in its first phase to align with the realities of heterogeneous compute environments. This enables a feasibility study and evaluation of federated scheduling, aggregation, orchestration frameworks, and PEFT handling before scaling to larger LLMs in potentially succeeding projects.
+
+### Chapter 2. Orchestration Frameworks for Federated Fine-Tuning
+
+For a successful implementation, FL requires an orchestration system capable of coordinating training rounds, exchanging model updates, handling heterogeneous compute and ensuring reproducibility. In cross-silo settings, where participating organizations operate isolated compute clusters with different hardware, network conditions, and internal policies, this orchestration layer becomes a central component of the entire workflow. Thus, this chapter surveys the requirements for a functional orchestration solution and compares several state-of-the-art frameworks suitable for federated fine-tuning of foundation models, including the perspectives of both decoder-only LLMs and encoder-only architectures for relevance.
+
+#### 4.1 Requirements for Orchestration
+
+A federated orchestration framework must support a variety of system-level and model-level requirements, including:
+
+- **Hardware Agnosticism**, where clients should be able to operate different GPU vendors.
+- **Lightweight Deployment**, where clients must be deployable through e.g. docker containers, isolated compute clusters and firewalled on-prem hardware.
+- **Flexible Integration**, where the framework should support custom training loops, PEFT, compression, quantization and custom aggregators.
+- **Efficient Communication**, where the orchestration layer must minimize message size, handle partial or failed updates, and support either asynchronous or semi-synchronous aggregation.
+
+Another complementary requirement is the implementation of experiment tracking. While orchestration frameworks provide the mechanisms for coordination and communication, they do not always natively support the experiment tracking, model versioning, and artifact management needed for a multi-client federation. In NextGen, MLflow will fill  this role by:
+
+- **First**, providing a centralized logging of both global and client-side metrics. Each training round produces a record of loss values, validation accuracy, hyperparameters, and resource usage. This information is essential for diagnosing convergence issues across heterogeneous clients.
+- **Second**, handling versioning of model artifacts. Every aggregated model produced by the orchestrator is stored with a unique run ID, enabling full traceability. This becomes invaluable when comparing the effects of different FL algorithms, communication strategies, or compression methods.
+- **Third**, providing a shared experiment dashboard accessible across organizational boundaries. This transparency helps partners understand model evolution without exposing raw data, reinforcing the project’s governance and collaboration goals. 
+
+To approach this, client containers may, for instance, simply log their metrics using MLflow’s REST API while the orchestrator registers global checkpoints. GitLab further complements this workflow by providing container versioning, CI/CD, and automated registry cleanup for obsolete models and images.
+
+#### 4.2 Flower
+
+Flower is a lightweight, flexible framework designed for research and applied cross-silo federated learning. It has minimal architectural overhead and supports a broad range of deep learning workflows. Its design emphasizes modularity and framework-agnosticism, making it straightforward to embed inside Docker images.
+
+**Advantages**
+
+- Flexible strategy abstraction
+- Supports custom aggregation, client selection, and training logic
+- Hardware-agnostic
+- Simple API compatible with PyTorch and HuggingFace transformers
+- Easy to integrate with MLflow for tracking
+- Well-suited for adapter-based training, e.g. LoRA/QLoRA
+
+
+**Limitations**
+
+- Limited built-in security primitives, but supports secure aggregation and privacy mechanisms through extensions or custom integration.
+- Requires more manual setup than enterprise-oriented frameworks
+
+In general, Flower matches the architectural needs of the NextGen prototype by enabling fast iteration processes, custom and research-oriented experimentation, and works across most hardware, making it highly relevant for orchestration.
+
+#### 4.3 FedML
+
+FedML is a large FL ecosystem covering orchestration, dashboards, benchmarking, mobile/edge deployment, and distributed training. While powerful, this breadth also introduces complexity through tendencies to require deeper alignment within its ecosystem, making the integration into diverse environments such as the one considered in this project more demanding.
+
+**Advantages**
+
+- Large ecosystem of tools beyond orchestration
+- Built-in monitoring dashboards
+- Pre-implemented FL algorithms (FedAvg, FedProx, FedOpt, etc.)
+- Support for cross-device and cross-silo scenarios
+
+**Limitations**
+
+- Heavy dependency footprint
+- Less flexible for custom research pipelines
+- Not optimized for PEFT and transformer ecosystem integration
+- More complicated for participants with strict IT governance
+
+Thus, FedML is powerful but unnecessarily heavy for a research-driven infrastructure prototype. Its abstractions may hinder rapid experimentation, especially with custom LLM and encoder-only fine-tuning workflows, making it a less relevant choice for initial development. Still, FedML remains a valuable reference framework for future evaluations, particularly as the project scales or if automated scheduling across mixed hardware becomes a priority.
+
+
+#### 4.4 OpenFL (Intel)
+
+Open Federated Learning (OpenFL), developed by Intel, emphasizes security. It offers native support for secure aggregation, encrypted tensor transmission, and  privacy-preserving coordination — features that are attractive for sensitive or regulated domains such as medical or automotive data.
+
+**Advantages**
+
+- Secure aggregation and encrypted update exchange
+- Trusted Execution Environment (TEE) support
+- Clear deployment models for regulated industries
+- Strong documentation for siloed, security-critical workflows
+
+**Limitations** 
+
+- Less flexible for research and custom fine-tuning approaches
+- Weak integration with HuggingFace transformers and PEFT
+- Higher engineering overhead
+- Security layers add complexity not needed for early experimentation
+
+In summary, OpenFL is appropriate for production systems where security guarantees are essential. However, it is not ideal for rapid testing across heterogeneous hardware or for adapting PEFT-based LLM and encoder-only training workflows. Nevertheless, OpenFL represents an important direction, particularly for when the project starts investigating privacy-critical workflows. Some of its architectural patterns may, for instance, later inform more secure versions of the orchestration pipeline.
+
+#### 4.5 Scaleout Edge (Scaleout Systems AB)
+
+Scaleout Edge is a Swedish-developed federated learning framework developed by a long-standing partner of AI Sweden. It targets production-grade, cross-silo FL with a focus on scalability and operational reliability, and brings extensive experience working on FL infrastructure in Swedish research settings. Their involvement in the development of the privacy analysis tool LeakPro also strengthens their relevance to NextGen’s focus on data sovereignty and leakage mitigation.
+
+**Advantages**
+
+- Proven track record
+- Scalable and production-ready
+- Supports encrypted aggregates and governance workflows
+- Good long-term candidate for operationalization
+
+**Limitations**
+
+- Limited support for heterogeneous GPU training
+- Not optimized for transformer-based fine-tuning
+- Possibly less flexible for custom research code, unless invited as partner for joint exploration
+
+The platform provided by Scaleout aligns well with a longer-term operationalization goal, particularly once decoder-only LLM workflows mature, however, its current  limitations make it less suitable for early-stage experimentation with encoder-only models or LoRA/QLoRA-based LLM training.
+
+#### 4.6 Summary
+
+In summary, Flower provides the most appropriate foundation for NextGen’s purpose and development. Its flexibility, ease of use and compatibility with hardware make it ideal for rapid experimentation. In addition, MLflow complements the orchestration through experiment-tracking, versioning, and governance capabilities that a federated system requires. FedML and OpenFL remain valuable complements but introduce either complexity or hardware bias, while Scaleout Edge adds strategic expertise particularly relevant for privacy and operationalization. Together, however, this ecosystem provides a strong platform for building Sweden’s next generation of distributed foundation-model infrastructure.
+
+To get a working example going, we may also use the merging tools provided by Hugging Face, which are already adapted for most types of LLM models encountered in this project.
+
+### Chapter 3. A Brief Survey on Federated Learning Algorithms
+
+While orchestration frameworks determine how clients communicate and exchange updates, the choice of federated learning algorithm governs how local model updates are produced at each client and how they are aggregated into a new global model. When clients differ in data distribution, compute capabilities and network conditions, the choice of algorithm becomes central for the stability and performance of the optimization trajectory. This is especially true for decoder-only Large Language Models (LLMs), whose scale makes them particularly sensitive to drift, while smaller encoder-only architectures such as sentence-transformers show greater robustness but still benefit from algorithmic support. The role of FL algorithms is therefore not simply to coordinate averaging, but to compensate for these challenges and ensure fairness across clients.
+
+The following sections introduce some of the most relevant algorithmic families for Federated LLM fine-tuning, providing an overview of their mechanics, implementation principles, strengths and limitations, and relevance to the NextGen project.
+
+#### 5.1 The role of FL Algorithms in LLM Fine-Tuning
+
+At the heart of FL lies a tension between local specialization and global coherency. In traditional machine learning, centralized stochastic gradient descent relies on tightly synchronized mini-batches of data. Federated learning, on the other hand, must integrate gradients or weight deltas generated independently by clients. When each client then trains on data with inherent variations in domain, size, or stylistic characteristics, the resulting updates do not always align. For small models, such inconsistencies may be tolerable. For foundation models, these divergences can more easily cascade into unstable updates or collapse of the global model. The primary goal of an FL algorithm is, for that reason, to combine local insights into a coherent global model in a way that is efficient, stable, and robust to statistical and system-level heterogeneities, thus serving as the “glue” that binds local computations into a stable optimization trajectory. This challenge has two dimensions:
+
+- **Statistical heterogeneity**: Local data distributions rarely match the global one. For LLMs, the autoregressive objective is particularly sensitive to domain shifts, where different writing styles, vocabularies, and token frequencies can lead clients to push the model in conflicting directions. Encoder-only models are typically more stable due to their contrastive or embedding-based objectives, but non-IID updates can still slow the convergence.
+- **System heterogeneity**: Clients vary in GPU memory, throughput, and network quality. For large models, these differences mean that some clients may take much longer to
+complete local updates, or may need to train with quantized weights or PEFT modules rather than full fine-tuning. 
+
+FL algorithms function as the mechanism that absorbs these inconsistencies, constraining or correcting client updates to maintain meaningful global learning. They determine whether federated fine-tuning converges efficiently, or even at all.
+
+#### 5.2 Federated Averaging: The Baseline
+
+The most fundamental FL algorithm is Federated Averaging (FedAvg) (McMahan et al., 2017). Its logic is straightforward: at each training round, the server broadcasts the global model, clients train locally, and the server computes a weighted average of returned model parameters:
+
+$$w_{t+1} = \sum_{k=1}^{K} \frac{n_k}{n_{tot}} w_{t+1}^k$$
+
+Mathematically, this is comparable to distributed mini-batch gradient descent when data are IID. In terms of implementation, McMahan et al. (2017) presents the following algorithm:
+
+::: {.algorithm-box}
+**Algorithm 1** FederatedAveraging. The $K$ clients are indexed by $k$; $B$ is the local minibatch size, $E$ is the number of local epochs, and $\eta$ is the learning rate.
+
+**Server executes:**\
+`1:` initialize $w_0$\
+`2:` **for** each round $t=1, 2, \dots$ **do**\
+`3:` $\quad$ $m \leftarrow \max(C \cdot K, 1)$\
+`4:` $\quad$ $S_t \leftarrow$ (random set of $m$ clients)\
+`5:` $\quad$ **for** each client $k \in S_t$ in parallel **do**\
+`6:` $\quad\quad$ $w_{t+1}^k \leftarrow \text{ClientUpdate}(k, w_t)$\
+`7:` $\quad$ $w_{t+1} \leftarrow \sum_{k=1}^K \frac{n_k}{n} w_{t+1}^k$
+
+**ClientUpdate**($k, w$):\
+`1:` $\mathcal{B} \leftarrow$ (split $\mathcal{P}_k$ into batches of size $B$)\
+`2:` **for** each local epoch $i$ from 1 to $E$ **do**\
+`3:` $\quad$ **for** batch $b \in \mathcal{B}$ **do**\
+`4:` $\quad\quad$ $w \leftarrow w - \eta \nabla l(w; b)$\
+`5:` **return** $w$ to server
+
+:::
+
+The simplicity of the algorithms is precisely its strength: it is trivial to implement in nearly any federated learning framework, and it imposes minimal assumptions on the clients making it a baseline for most other alternatives. These qualities, however, can also make it struggle in federated LLM training. For encoder-only models, such as BERT-derived sentence-transformers, simple averaging often works surprisingly well. Their objectives produce smooth gradients, and their smaller size reduces instability. For decoder-only LLMs, FedAvg can become unstable or slow to converge under strong non-IID conditions, as local updates may drift significantly, producing inefficient or inconsistent global updates. FedAvg also requires clients to transmit full model weights or full gradients, which becomes prohibitively expensive for models containing large parameter sets.
+
+**Advantages**:
+
+- Simple and widely implemented (Flower, FedML etc)
+- Minimal computation and communication overhead.
+- Serves as a baseline for evaluating more advanced methods
+
+**Limitations**:
+
+- Highly sensitive to non-IID data and client drift.
+- Unstable for large-scale models such as LLMs.
+- Requires transmitting full model parameters unless paired with compression.
+- Sensitive to varying train batch sizes and training dynamics
+
+In summary, the algorithm provides a good baseline as reference but not necessarily a practical solution for LLM fine-tuning, demonstrating why additional algorithmic  scaffolding is often required in large-model FL.
+
+#### 5.3 Stabilizing Learning Under Non-IID Data
+
+#### 5.3.1 FedProx: Regularizing Local Updates
+
+To address the instability of FedAvg, FedProx (Li et al., 2020a) introduces a proximal term that penalizes excessive deviation from the global model. Instead of minimizing only the original loss $F_k(w)$, each client solves
+
+$$\arg\min_w h_k(w; w^t) = F_k(w) + \frac{\mu}{2}\left\|w - w^t\right\|^2$$
+
+With the global aggregation rule:$$w^{t+1} = \frac{1}{K} \sum_{k \in S_t} w_k^{t+1}$$
+
+where $w^t$ is the current global model and $\mu$ controls how strongly the client is pulled toward the central reference point, reducing the variance of updates. This imposes a kind of “regularized gravity” on client updates where they are free to move in the direction of their local gradients, but not so freely that they diverge dramatically. FedProx is for that reason especially useful for LLMs and can be implemented following the procedure presented by Li et al. (2020):
+
+::: {.algorithm-box}
+**Algorithm 2** FedProx (Proposed Framework)\
+**Input:** $K, T, \mu, \gamma, w^0, N, p_k, k=1, \dots, N$
+
+`1:` **for** $t=0, \dots, T-1$ **do**\
+`2:` $\quad$ Server selects a subset $S_t$ of $K$ devices at random (each device $k$ is chosen with probability $p_k$)\
+`3:` $\quad$ Server sends $w^t$ to all chosen devices\
+`4:` $\quad$ Each chosen device $k \in S_t$ finds a $w_k^{t+1}$ which is a $\gamma_k^t$-inexact minimizer of:\
+$\quad\quad\quad$ $\arg\min_w h_k(w; w^t) = F_k(w) + \frac{\mu}{2} \|w - w^t\|^2$\
+`5:` $\quad$ Each device $k \in S_t$ sends $w_k^{t+1}$ back to the server\
+`6:` $\quad$ Server aggregates the weights as $w^{t+1} = \frac{1}{K} \sum_{k \in S_t} w_k^{t+1}$\
+`7:` **end for**
+
+:::
+
+The algorithm is also notably lightweight, requiring no architectural changes and hence often serves as the first step when FedAvg becomes unstable.
+
+**Advantages**:
+
+- Better stability under heterogeneous data.
+- Minimal overhead requiring only a change to the local loss.
+- Easy to integrate into existing training loops.
+
+**Limitations**:
+
+- Requires tuning the proximal coefficient μ
+- If too weak, it behaves like FedAvg and conversely, if too strong it inhibits learning.
+- Does not reduce communication cost.
+
+#### 5.3.2 Scaffold: Control Variates to Reduce Bias
+
+Scaffold (Karimireddy et al., 2020) tackles heterogeneity more explicitly by maintaining correction vectors (control variates) at both client and server. Instead of simply averaging weights, global and client-specific correction terms estimate the difference between local and global gradient directions, reducing bias introduced by non-IID data. This is done by modeling the difference between the global gradient estimate c and each client’s local estimate $c_k$. Updates then follow:
+
+$$w_{t+1}^{k}=w_{t}-\eta(\nabla F_{k}(w_{t})-c_{k}+c)$$
+
+By correcting for drift at every step, the algorithm achieves improved convergence under non-IID conditions, where clients apply correction vectors $\Delta c$ to their local gradients at every single mini-batch step inside the training loop. By continuously correcting the optimization trajectory rather than just the final payload, the algorithm ensures a much more consistent optimization direction across the federation before updates are sent to the server. The cost of this stability is higher communication overhead as clients and server must synchronize control variates in addition to model updates. For encoder-only models, this overhead can become significant, making Scaffold appealing but perhaps impractical unless clients’ data distributions differ dramatically.
+
+::: {.algorithm-box}
+**Algorithm 3** SCAFFOLD: Stochastic Controlled Averaging for federated learning
+
+
+`1:` **server input:** initial $x$ and $c$, and global step-size $\eta_g$\
+`2:` **client's inputs:** $c_i$, and local step-size $\eta_l$\
+`3:` **for** each round $r=1, \dots, R$ **do**\
+`4:` $\quad$ sample clients $\mathcal{S} \subseteq \{1, \dots, N\}$\
+`5:` $\quad$ communicate $(x, c)$ to all clients $i \in \mathcal{S}$\
+`6:` $\quad$ **on client** $i \in \mathcal{S}$ in parallel **do**\
+`7:` $\quad\quad$ initialize local model $y_i \leftarrow x$\
+`8:` $\quad\quad$ **for** $k=1, \dots, K$ **do**\
+`9:` $\quad\quad\quad$ compute minibatch-gradient $g_i(y_i)$\
+`10:` $\quad\quad\quad$ $y_i \leftarrow y_i - \eta_l(g_i(y_i) - c_i + c)$\
+`11:` $\quad\quad$ **end for**\
+`12:` $\quad\quad$ $c_i^+ \leftarrow$ (i) $g_i(x)$, or (ii) $c_i - c + \frac{1}{K \eta_l}(x - y_i)$\
+`13:` $\quad\quad$ communicate $(\Delta y_i, \Delta c_i) \leftarrow (y_i - x, c_i^+ - c_i)$\
+`14:` $\quad$ **end on client**\
+`15:` $\quad$ $(\Delta x, \Delta c) \leftarrow \frac{1}{|\mathcal{S}|} \sum_{i \in \mathcal{S}} (\Delta y_i, \Delta c_i)$\
+`16:` $\quad$ $x \leftarrow x + \eta_g \Delta x$ and $c \leftarrow c + \frac{|\mathcal{S}|}{N} \Delta c$\
+`17:` **end for**
+
+:::
+
+**Advantages:**
+
+- Strong theoretical guarantees under data heterogeneity.
+- More stable optimization for challenging data distributions.
+- Reduces client drift more effectively than FedProx.
+
+**Limitations:**
+
+- Increased communication overhead due to control variates.
+- Additional memory and computation on both client and server.
+- Less suitable for extremely large models without compression.
+
+
+#### 5.4 Adaptive Server Optimization: The FedOpt Family
+
+While FedAvg modifies the client-side optimization, the FedOpt family adapts the global optimization step using server-side variants of Adam, Yogi and Adagrad techniques (Reddi et al., 2021). The process is similar to that of the Adam optimizer widely used for LLMs: after receiving client updates, the server computes aggregate gradients and updates its first and second moment estimates
+
+$$m_{t}=\beta_{1}m_{t-1}+(1-\beta_{1})\Delta_{t}$$
+
+$$v_{t}=\beta_{2}v_{t-1}+(1-\beta_{2})\Delta_{t}^{2}$$
+
+where the model is then updated by computing the modified weights:
+
+$$w_{t+1}=w_{t}-\eta \frac{m_{t}}{\sqrt{v_{t}}+\tau}$$
+
+This compensates for the differences in step magnitudes and optimization dynamics across clients. This method provides faster, smoother, and more stable convergence, particularly helpful for transformer models trained under heterogeneous conditions. FedAdam in particular often leads to faster and more stable convergence especially in situations where clients employ different batch sizes, learning rates, or hardware architectures. 
+
+The FedOpt family of algorithms have therefore become particularly important for federated fine-tuning of language models. Since transformer architectures are highly sensitive to learning rate schedules and gradient scaling, applying an adaptive optimizer on the server helps prevent the “gradient mismatch” that otherwise arises when local models update using different effective optimizers. For both decoder-only LLMs and encoder-only models, FedAdam presents a robust default choice. For that reason, many federated LLM papers adopt this method as their primary strategy. To implement the method, we refer to the two algorithms presented by Riddi et al. (2021):
+
+::: {.algorithm-box}
+**Algorithm 4** FEDOPT
+
+`1:` **Input:** $x_0$, CLIENTOPT, SERVEROPT\
+`2:` **for** $t=0, \dots, T-1$ **do**\
+`3:` $\quad$ Sample a subset $\mathcal{S}$ of clients\
+`4:` $\quad$ $x_{i,0}^t = x_t$\
+`5:` $\quad$ **for** each client $i \in \mathcal{S}$ in parallel **do**\
+`6:` $\quad\quad$ **for** $k=0, \dots, K-1$ **do**\
+`7:` $\quad\quad\quad$ Compute an unbiased estimate $g_{i,k}^t$ of $\nabla F_i(x_{i,k}^t)$\
+`8:` $\quad\quad\quad$ $x_{i,k+1}^t = \text{CLIENTOPT}(x_{i,k}^t, g_{i,k}^t, \eta_l, t)$\
+`9:` $\quad\quad$ $\Delta_i^t = x_{i,K}^t - x_t$\
+`10:` $\quad$ $\Delta_t = \frac{1}{|\mathcal{S}|} \sum_{i \in \mathcal{S}} \Delta_i^t$\
+`11:` $\quad$ $x_{t+1} = \text{SERVEROPT}(x_t, -\Delta_t, \eta, t)$
+
+:::
+
+::: {.algorithm-box}
+**Algorithm 5** FEDADAGRAD, FEDYOGI, and FEDADAM
+
+`1:` **Initialization:** $x_0$, $v_{-1} \geq \tau^2$, decay parameters $\beta_1, \beta_2 \in [0, 1)$\
+`2:` **for** $t=0, \dots, T-1$ **do**\
+`3:` $\quad$ Sample a subset $\mathcal{S}$ of clients\
+`4:` $\quad$ $x_{i,0}^t = x_t$\
+`5:` $\quad$ **for** each client $i \in \mathcal{S}$ in parallel **do**\
+`6:` $\quad\quad$ **for** $k=0, \dots, K-1$ **do**\
+`7:` $\quad\quad\quad$ Compute an unbiased estimate $g_{i,k}^t$ of $\nabla F_i(x_{i,k}^t)$\
+`8:` $\quad\quad\quad$ $x_{i,k+1}^t = x_{i,k}^t - \eta_l g_{i,k}^t$\
+`9:` $\quad\quad$ $\Delta_i^t = x_{i,K}^t - x_t$\
+`10:` $\quad$ $\Delta_t = \frac{1}{|\mathcal{S}|} \sum_{i \in \mathcal{S}} \Delta_i^t$\
+`11:` $\quad$ $m_t = \beta_1 m_{t-1} + (1 - \beta_1) \Delta_t$\
+`12:` $\quad$ $v_t = v_{t-1} + \Delta_t^2$ $\quad\quad\quad\quad$ (FEDADAGRAD)\
+`13:` $\quad$ $v_t = v_{t-1} - (1 - \beta_2) \Delta_t^2 \text{sign}(v_{t-1} - \Delta_t^2)$ $\quad\quad\quad\quad$ (FEDYOGI)\
+`14:` $\quad$ $v_t = \beta_2 v_{t-1} + (1 - \beta_2) \Delta_t^2$ $\quad\quad\quad\quad$ (FEDADAM)\
+`15:` $\quad$ $x_{t+1} = x_t + \frac{\eta m_t}{\sqrt{v_t} + \tau}$
+
+:::
+**Advantages:**
+
+- More stable and faster convergence than FedAvg.
+- Handles heterogeneous client learning rates, batch sizes, and optimizers.
+- Excellent performance for transformer models.
+
+**Limitations:**
+
+- Slightly more server-side state to maintain.
+- Still requires full or compressed updates unless paired with PEFT.
+
+#### 5.5 Reducing Communication: OpenDiLoCo
+
+Communication efficiency is arguably the most critical challenge when scaling federated learning to LLMs. Even if clients have ample GPU capacity to perform local training, sending full model weights to the central server each round remains prohibitively expensive. OpenDiLoCo (Jaghouar et al., 2024) and other low-communication algorithms tackle this challenge by reducing either the frequency or the size of updates, or both. For LLMs, it is essential. For encoder-only models, it enables extremely fast rounds and minimizes latency across slower networks.
+
+In detail, OpenDiLoCo is a communication-efficient training method derived from DiLoCo. Instead of exchanging full model gradients or full weight updates, clients perform many local AdamW steps before synchronizing, summarizing the effects of longer local optimization trajectories. After these extended local horizons, each client sends a compact pseudo-gradient to the server, which applies an outer Nesterov-style update similar to that of Adam and FedOpt. This significantly reduces synchronization frequency and communication volume without requiring any explicit low-rank factorization of the weight updates. OpenDiLoCo is therefore best understood as a long-horizon, low-communication optimizer, and not as a low-rank update method.
+
+This approach has proven effective for large models—including LLMs—given that the communication savings can be dramatic, especially in settings where bandwidth differs across clients. The trade-off, however, is that reduced communication frequency increases the risk of local drift, requiring careful tuning of how many local steps clients take between synchronizations. Nonetheless, methods like OpenDiLoCo or hybrid strategies combining FedOpt with compressed updates are among the more promising directions for scaling federated LLM fine-tuning in practice.
+
+**Advantages:**
+
+- Typically reduces communication significantly.
+- Better suited for resource- or bandwidth-constrained clients.
+- Demonstrated effectiveness on LLMs.
+
+**Limitations:**
+
+- More complex tuning of local training length.
+- Some loss of update precision from compression.
+- Slightly higher computational complexity on the server.
+
+#### 5.6 Fairness-Aware Aggregation: Q-FedAvg
+
+Although fairness plays a larger role in federations involving many participants—such as mobile-device networks—Q-FedAvg (Li, et al. 2020b) is worth mentioning for completeness. The algorithm modifies the aggregation rule so that clients with higher local losses have proportionally greater influence on the global model. This prevents the global model from overfitting to clients with abundant or easy data while neglecting those with challenging distributions. Mathematically, instead of weighting by dataset size, the algorithm weights updates by an exponent of client loss
+
+$$q_k = (F_k(w_t) + \epsilon)^q$$
+
+And the global server weight update rule:
+$$w^{t+1}=w^{t}-\frac{\sum_{k\in S_{t}}\Delta_{k}^{t}}{\sum_{k\in S_{t}}h_{k}^{t}}$$
+
+This ensures that clients whose local models struggle as a result of, for instance, difficult data or
+low computational capacity, contribute more strongly to the global model update. In the context
+of NextGen, where the number of clients is relatively small, Q-FedAvg is less essential but
+remains relevant if data-volume imbalances or systematic accuracy disparities emerge across
+compute stacks. Notably, encoder-only models also benefit less from such corrections due to
+their smoother training dynamics.
+
+An algorithmic overview proposed by Li, et al. (2020b) is presented below:
+
+::: {.algorithm-box}
+**Algorithm 6** q-FedAvg\
+**Input:** $K, E, T, q, 1/L, \eta, w^0, p_k, k=1, \dots, m$
+
+`1:` **for** $t=0, \dots, T-1$ **do**\
+`2:` $\quad$ Server selects a subset $S_t$ of $K$ devices at random (each device $k$ is chosen with prob. $p_k$)\
+`3:` $\quad$ Server sends $w^t$ to all selected devices\
+`4:` $\quad$ Each selected device $k$ updates $w^t$ for $E$ epochs of SGD on $F_k$ with step-size $\eta$ to obtain $\bar{w}_k^{t+1}$\
+`5:` $\quad$ Each selected device $k$ computes:\
+`6:` $\quad\quad$ $\Delta w_k^t = L(w^t - \bar{w}_k^{t+1})$\
+`7:` $\quad\quad$ $\Delta_k^t = F_k^q (w^t) \Delta w_k^t$\
+$\quad\quad\quad$ $h_k^t = q F_k^{q-1}(w^t) \|\Delta w_k^t\|^2 + L F_k^q (w^t)$\
+`8:` $\quad$ Each selected device $k$ sends $\Delta_k^t$ and $h_k^t$ back to the server\
+$\quad\quad$ Server updates $w^{t+1}$ as:\
+$\quad\quad\quad$ $w^{t+1} = w^t - \frac{\sum_{k \in S_t} \Delta_k^t}{\sum_{k \in S_t} h_k^t}$\
+`9:` **end for**
+
+:::
+
+**Advantages:**
+
+- Promotes fairness across clients with unequal performance.
+- Prevents domination by large or “easy” data sources.
+
+**Limitations:**
+
+- Less relevant with few, well-resourced clients.
+- Can slow convergence if losses vary widely.
+
+#### 5.7 Parameter-Efficient Federated Learning
+
+Parameter-efficient fine-tuning (PEFT) is essential for federated LLM training. Instead of transmitting full model weights—which may be infeasible for models anything larger than a few hundred million parameters—clients only update and send small, trainable adapter modules. The most widely used of these is LoRA (Low-Rank Adaptation) (Hu, et al. 2021), which decomposes the trainable update to a weight matrix parameterized as a low-rank decomposition
+
+$$\Delta W = A B^T$$
+
+where $A$ and $B$ are small matrices with rank $r \ll \min(d,k)$
+
+These matrices are typically tiny compared to full model weights, reducing communication costs by one to two orders of magnitude while preserving competitive accuracy in many tasks. This is notably separate from OpenDiLoCo, which relies on long local training and pseudo-gradients rather than low-rank structures. QLoRA extends this idea by quantizing the base model to 4-bit precision and fine-tuning only LoRA layers, allowing even very large models to be trained on moderate GPUs (Dettmers, et al. 2023). Prompt-based approaches go further still, transmitting only learned prompt vectors or prefix embeddings, though they tend to underperform LoRA for more complex downstream tasks.
+
+Because adapter-based methods dramatically reduce the amount of data clients need to send in each round, they enable federated training of models that would otherwise be out of reach. PEFT also enables encoder-only models to train with almost negligible overhead. For NextGen, adapter-based FL is foundational.
+
+**Advantages:**
+
+- Model updates are extremely small → ideal for FL.
+- Enables LLM fine-tuning on heterogeneous hardware.
+- Strong empirical performance on domain adaptation tasks.
+
+**Limitations:**
+
+- May underperform full fine-tuning for highly specialized tasks.
+- Requires careful selection of rank and learning rate.
+- Some architectures are more amenable to LoRA than others.
+
+#### 5.8 Summary
+
+In summary, the algorithms presented in this chapter represent an introduction to the spectrum of strategies available for federated LLM fine-tuning. FedAvg provides an important baseline, but its limitations under heterogeneity make it unsuitable for some real-world deployments. Algorithms like FedProx and Scaffold mitigate client drift—an especially pressing issue for LLMs—while FedOpt accelerates and stabilizes training using adaptive optimization at the server. OpenDiLoCo and related communication-efficient methods address the communication bottleneck inherent in LLMs by reducing update size and frequency. Finally, parameter-efficient fine-tuning methods such as LoRA and QLoRA fundamentally reshape what is communicated, making federated LLM training feasible across heterogeneous compute.
+For the NextGen project, a robust and practical starting point is likely a combination of FedAdam (from the FedOpt family) with LoRA or QLoRA-based parameter-efficient updates.
+
+This pairing balances stability, efficiency, and scalability, and integrates seamlessly with many orchestration frameworks and the current MLflow-based experiment tracking system that the project has adopted so far. Secondary algorithms like FedProx or OpenDiLoCo may be introduced as needed depending on observed data heterogeneity or communication constraints during deployment.
+
+### References
+
+[1] Alec Radford, Karthik Narasimhan, Tim Salimans and Ilya Sutskever: Improving language understanding by generative pre-training. (2018).
+
+[2] Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan, Dario Amodei et al. (2020). Language models are few-shot learners. In Advances in Neural Information Processing Systems, volume 33, pages 1877–1901.
+
+[3] Hugo Touvron, Louis Martin, Kevin Stone, et al. (2023). LLaMA 2: Open foundation and fine-tuned chat models. arXiv preprint: [arXiv:2307.09288](https://arxiv.org/abs/2307.09288)
+
+[4] Jacob Devlin, Ming-Wei Chang, Kenton Lee and Kristina Toutanova. (2018). BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding. arXiv preprint: [arxiv.org/abs/1810.04805](https://arxiv.org/abs/1810.04805)
+
+[5] Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, et al. (2019). RoBERTa: A Robustly Optimized BERT Pretraining Approach. arXiv preprint: [arxiv.org/abs/1907.11692](https://arxiv.org/abs/1907.11692)
+
+[6] Pengcheng He, Jianfeng Gao and Weizhu Chen. (2021). DeBERTaV3: Improving DeBERTa using ELECTRA-Style Pre-Training with Gradient-Disentangled Embedding Sharing. arXiv preprint: [arxiv.org/abs/2111.09543](https://arxiv.org/abs/2111.09543)
+
+[7] Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang and Ming Zhou. (2020). MiniLM: Deep Self-Attention Distillation for Task-Agnostic Compression of Pre-Trained Transformers. arXiv preprint: [arxiv.org/abs/2002.10957](https://arxiv.org/abs/2002.10957)
+
+[8] Nils Reimers and Iryna Gurevych. (2019). Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks. arXiv preprint: [arxiv.org/abs/1908.10084](https://arxiv.org/abs/1908.10084)
+
+[9] Chaochao Chen, Xiaohua Feng, Jun Zhou, Jianwei Yin, and Xiaolin Zheng. (2023). Federated large language model: A position paper. arXiv preprint: [arXiv:2307.08925](https://arxiv.org/abs/2307.08925)
+
+[10] Sixing Yu, J Pablo Muñoz, and Ali Jannesari. (2023). Federated foundation models: Privacy-preserving and collaborative learning for large models. arXiv preprint: [arXiv:2305.11414](https://arxiv.org/abs/2305.11414)
+
+[11] Herbert Woisetschläger, Alexander Isenko, Shiqiang Wang, Ruben Mayer, and Hans-Arno Jacobsen. (2024). A survey on efficient federated learning methods for foundation model training. arXiv preprint: [arXiv:2401.04472](https://arxiv.org/abs/2401.04472)
+
+[12] Weiming Zhuang, Chen Chen, and Lingjuan Lyu. (2023). When foundation model meets federated learning: Motivations, challenges, and future directions. arXiv preprint:
+[arXiv:2306.15546](https://arxiv.org/abs/2306.15546)
+
+[13] Yuhang Yao, Jianyi Zhang et al. (2024). Federated Large Language Models: Current Progress and Future Directions. arXiv preprint: [arXiv:2409.15723](https://arxiv.org/abs/2409.15723)
+
+[14] Rui Ye, Wenhao Wang, Jingyi Chai, Dihan Li, Zexi Li, Yinda Xu, Yaxin Du, Yanfeng Wang, and Siheng Chen. (2024). Openfedllm: Training large language models on decentralized private data via federated learning. arXiv preprint: [arXiv:2402.06954](https://arxiv.org/abs/2402.06954)
+
+[15] Zhenheng Tang, Yuxin Wang, Xin He, Longteng Zhang, et al. (2023). Fusionai: Decentralized training and deploying llms with massive consumer-level gpus. arXiv preprint: [arXiv:2309.01172](https://arxiv.org/abs/2309.01172)
+
+[16] Binhang Yuan, Yongjun He, Jared Davis, Tianyi Zhang, Tri Dao, Beidi Chen, Percy S Liang, Christopher Re, and Ce Zhang. (2022) Decentralized training of foundation models in heterogeneous environments. Advances in Neural Information Processing Systems, 35: 25464–25477
+
+[17] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson and Blaise Aguera y Arcas. (2017). Communication-Efficient Learning of Deep Networks from Decentralized Data. Proceedings of the 20th International Conference on Artificial Intelligence and Statistics, PMLR 54:1273-1282.
+
+[18] Tian Li, Anit Kumar Sahu, Manzil Zaheer, Maziar Sanjabi, Ameet Talwalkar and Virginia Smith. (2020a). Federated Optimization in Heterogeneous Networks. arXiv preprint: [arxiv.org/abs/1812.06127](https://arxiv.org/abs/1812.06127)
+
+[19] Sai Praneeth Karimireddy, Satyen Kale, Mehryar Mohri, Sashank Reddi, Sebastian Stich and Ananda Theertha Suresh. (2020). SCAFFOLD: Stochastic Controlled Averaging for
+Federated Learning. Proceedings of the 37th International Conference on Machine Learning, PMLR 119:5132-5143
+
+[20] Sashank Reddi, Zachary Charles, Manzil Zaheer, Zachary Garrett, Keith Rush, Jakub Konečný, Sanjiv Kumar and H. Brendan McMahan. (2021). Adaptive Federated Optimization.
+arXiv preprint: [arxiv.org/abs/2003.00295](https://arxiv.org/abs/2003.00295)
+
+[21] Sami Jaghouar, Jack Min Ong and Johannes Hagemann. (2024). OpenDiLoCo: An Open-Source Framework for Globally Distributed Low-Communication Training. arXiv preprint: [arxiv.org/abs/2407.07852](https://arxiv.org/abs/2407.07852)
+
+[22] Tian Li, Maziar Sanjabi, Ahmad Beirami and Virginia Smith. (2020b). Fair Resource Allocation in Federated Learning. arXiv preprint: [arxiv.org/abs/1905.10497](https://arxiv.org/abs/1905.10497)
+
+[23] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, et al. (2023). LoRA: Low-Rank Adaptation of Large Language Models. arXiv preprint: [arxiv.org/abs/2106.09685](https://arxiv.org/abs/2106.09685)
+
+[24] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman and Luke Zettlemoyer. (2023). QLoRA: Efficient Finetuning of Quantized LLMs. arXiv preprint: [arxiv.org/abs/2305.14314](https://arxiv.org/abs/2305.14314)

@@ -1,0 +1,17 @@
+### Limitations of the Current Framework Implementation
+
+Currently, our approach has several limitations.
+
+ - No redundancies at the master / central node. We rely on a single Gitlab instance as a single source of truth for storing and managing model versions. This translates to a potential single source of failure, particularly if poorly configured or not secured.
+
+ - Network bandwidth and Gitlab LFS storage limits are the primary scaling bottlenecks for training massive models, particularly over many rounds, as currently all intermediate model versions are stored.
+ 
+ - No stress tests on Gitlab have yet been carried out. I.e. scaling the number of clients could quickly turn this central instance into a bottleneck.
+
+ - Though we are not vendor-locked to Gitlab, scaling to a large number of clients may be difficult as the instance becomes a bottleneck, for example when uploading and downloading a large number of models concurrently across several projects.
+
+ - While the communication/deployment pattern is asynchronous (nodes spin up, idle, and push/pull independently without a master node holding a live, persistent socket connection to them), the learning process is synchronous in the sense that the entire optimization will only go as fast as the slowest client. This is a known limitation of decentralized learning approaches like federated learning, and beyond the scope of this project. Additionally, The master node must know in advance how many clients to expect.
+
+ - Authentication on a per-client level. Currently, anyone with the right `MLFLOW_TRACKING_URL` and `MLFLOW_TRACKING_TOKEN` authentication data can publish models under arbitrary version numbers, which can lead to (potentially unintended!) model / data poisoning errors.
+
+ - Because this framework has been designed with minimal requirements and assumptions for clients (i.e. all must agree only on the format of the model weights and on the communication protocol to the "blackboard"), clients of this framework could theoretically also use other languages beyond Python, or have completely different training stacks (e.g. Pytorch vs. JAX). At the time of writing this still remains untested; currently, we don't offer Python bindings for other languages, but since the interface to our library is quite minimal, we do not expect this to be a major hurdle.

@@ -1,0 +1,37 @@
+# -------------------------------------------------------------------
+# Quarto & Pandoc
+# -------------------------------------------------------------------
+# Ignore Quarto's internal state and project cache
+.quarto/
+
+# Ignore generated dependency folders (e.g., report_files/)
+*_files/
+
+# Ignore execution cache (if you ever use Python/R code chunks)
+*_cache/
+
+# -------------------------------------------------------------------
+# Build Artifacts
+# -------------------------------------------------------------------
+# Because GitHub Actions builds these for you and pushes them to gh-pages, 
+# you should not commit them to your main branch to avoid merge conflicts!
+*.html
+*.pdf
+
+# -------------------------------------------------------------------
+# OS & Editor Generated Files
+# -------------------------------------------------------------------
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors (VS Code, RStudio, etc.)
+.vscode/
+.Rproj.user/
+*.swp

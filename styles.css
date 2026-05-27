@@ -1,0 +1,266 @@
+/* ========================================= */
+/* GLOBAL DOCUMENT SETTINGS (Syncing Typst)  */
+/* ========================================= */
+
+/* Universal Code Font Styling (Syncing Typst) */
+code, pre {
+  font-family: "Roboto Mono", Consolas, monospace !important;
+  letter-spacing: -0.01em;       /* Very subtle tightening so it isn't overly spaced */
+}
+
+body {
+  font-family: "Roboto", "Segoe UI", Arial, sans-serif;
+  color: #333333;
+  /* letter-spacing: em; */ 
+  /* line-height: 0; */
+}
+
+/* Global hyperlink styling (Color + Underline) */
+a {
+  color: #0055CC;
+  text-decoration: underline;
+}
+
+/* Citations (Quarto uses these classes/roles for citations) */
+.citation, a[role="doc-biblioref"] {
+  color: #0055CC;
+  text-decoration: none; /* Typst rule didn't specify underline for cites */
+}
+
+/* ========================================= */
+/* COMPONENT STYLES                          */
+/* ========================================= */
+
+/* Custom Header Hierarchy (Syncing with Typst) 
+
+NOTE: strict mapping to titles, i.e. skipping in the hierarchy has no effect here
+
+*/
+
+h1 {
+  color: #555555;
+  font-size: 1.8em;
+  font-weight: bold;
+  margin-top: 2em;
+  margin-bottom: 1em;
+}
+
+h2 {
+  color: #666666;
+  font-size: 1.4em;
+  font-weight: bold;
+  margin-top: 2em;
+  margin-bottom: 1em;
+}
+
+h3 {
+  color: #666666;
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+h4 {
+  color: #777777;
+  font-size: 1em;
+  font-weight: bold;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+h5, h6 {
+  color: #888888;
+  font-size: 1em;
+  font-weight: bold;
+  margin-top: 0.75em;
+  margin-bottom: 0;
+}
+
+div[custom-style="researchbox"] {
+  border: 1px solid black;
+  padding: 1.5em;
+  margin: 1em 0;
+}
+
+/* Target our specific Lua-injected class and use !important to override Quarto's default theme */
+code.inline-code {
+  background-color: #f2f2f2 !important;
+  color: #333333 !important;
+  padding: 0.1em 0.3em !important;
+  border-radius: 3px !important;
+}
+
+/* 1. Base style for ALL outermost code blocks */
+div.sourceCode, 
+pre {
+  background-color: #f8f9fa !important;
+  border: 1px solid #e0e0e0 !important;
+  padding: 15px !important;       /* Restores the breathing room */
+  border-radius: 6px !important;
+  color: #333333;
+  display: block !important;      /* Forces it to take up full width */
+  overflow-x: auto !important;    /* Enables scrolling for long lines */
+}
+
+/* 2. Strip backgrounds from nested elements so they don't double-box */
+div.sourceCode pre,
+div.sourceCode code,
+pre code {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* 3. Ensure the inner code text has no margin, but respects the outer padding */
+div.sourceCode pre,
+pre code {
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+/* Card Layout */
+.custom-card {
+  background-color: #fafafa;
+  border: 1px solid #e0e0e0;
+  padding: 20px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+/* Theme Colors */
+.custom-card.anchor-theme { border-top: 4px solid #2196F3; }
+.custom-card.positive-theme { border-top: 4px solid #4CAF50; }
+.custom-card.negative-theme { border-top: 4px solid #E63946; }
+
+/* The horizontal line (---) */
+.custom-card hr {
+  border: none;
+  border-bottom: 1px solid #e0e0e0;
+  margin: 10px 0 15px 0;
+}
+
+/* Text Stylings */
+.orange-badge {
+  background-color: #FFE0B2;
+  color: #E65100;
+  font-weight: bold;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.subtext {
+  color: #777;
+  font-size: 0.9em;
+}
+
+/* Scale up display block math ($$) */
+.math.display {
+  font-size: 1.2em;
+  margin: 1.5em 0; /* Adds a bit of breathing room above and below */
+}
+
+/* Scale up inline math ($) slightly */
+.math.inline {
+  font-size: 1.05em;
+}
+
+/* Container and Tags */
+.quiz-card {
+  background-color: #fcfcfc;
+  border: 1px solid #e0e0e0;
+  padding: 20px;
+  border-radius: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+.quiz-tag {
+  background-color: #eeeeee;
+  color: #555555;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.7em;
+  font-family: monospace;
+  margin-right: 5px;
+  display: inline-block;
+  margin-bottom: 15px;
+}
+
+/* Typography Labels */
+.label-orange { color: #E65100; font-family: monospace; font-weight: bold; }
+.label-blue { color: #2196F3; font-family: monospace; font-weight: bold; }
+.label-dark { color: #333333; font-family: monospace; font-weight: bold; display: block; margin-bottom: 15px; }
+
+/* Multiple Choice Options */
+.mcq-option {
+  border: 1px solid #e0e0e0;
+  padding: 10px 15px;
+  border-radius: 6px;
+  margin-top: 0 !important;       /* Neutralize figure spacing */
+  margin-bottom: 10px !important; /* Force strict 10px bottom spacing */
+  background-color: #fafafa;
+}
+.mcq-option.correct {
+  border: 2px solid #4CAF50;
+  background-color: #E8F5E9;
+  color: #2E7D32;
+}
+.mcq-option.correct strong { color: #2E7D32; }
+
+/* System Prompt Box */
+.prompt-box {
+  background-color: #F8F9FA;
+  border: 1px solid #E0E0E0;
+  border-left: 4px solid #673AB7; /* Deep purple accent */
+  padding: 20px;
+  border-radius: 2px 6px 6px 2px;
+  margin: 2.5em 0;
+  font-size: 0.95em;
+}
+
+/* Ensure the absolute last element in the box doesn't add a trailing margin */
+.prompt-box > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* Visual indent to perfectly match bullet point text */
+.list-indent {
+  margin-left: 2.2em;
+  margin-bottom: 1.5em; /* Breathing room before the next block */
+}
+
+/* Increase the global indentation for top-level lists 
+main ul, 
+main ol {
+  padding-left: 3em !important;
+}
+*/
+
+/* Universal Algorithm Block */
+div[custom-style="algorithm-box"] {
+  background-color: #F8F9FA;
+  padding: 15px 20px;
+  border-radius: 6px;
+  margin: 2em 0;
+  border: 1px solid #E0E0E0;
+  font-size: 0.95em;
+  line-height: 1.5;
+}
+
+/* Make the entire algorithm container identical to a code block */
+.algorithm-box {
+  background-color: #f8f9fa !important;  /* Code block grey */
+  border: 1px solid #e0e0e0 !important;  /* Code block border */
+  padding: 15px !important;              /* Breathing room */
+  border-radius: 6px !important;
+  margin: 1.5em 0 !important;
+  color: #333333;
+}
+
+/* Style the horizontal rules inside to look clean */
+.algorithm-box hr {
+  border: none;
+  border-top: 1.5px solid #cccccc;
+  margin: 12px 0;
+}

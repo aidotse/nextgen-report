@@ -1,0 +1,107 @@
+### A Comparison to the Flower FL Framework
+
+Many high quality, open source federated learning frameworks are already directly available for use. This immediatley raises the question, whether the functionality in these frameworks is already sufficient to fulfill the formal requirements listed in the introduction section of this report. Flower [@beutel2022flowerfriendlyfederatedlearning] is an expcellent example of one such available framework. In this section we provide some remarks that justify the need for a different solution. While both projects are solving the problem of federated learning, this project does so with fundamentally different philosophies and architectural trade-offs. Our approach is uniquely tailored to a specific, modern MLOps ecosystem and provides distinct advantages that Flower does not; we argue that it is meets the list of requirements to a better degree than this open source alternative.
+
+#### Communication and State Management
+
+The single biggest difference lies in the communication model.
+
+Flower uses a synchronous, connection-based model. The server directly communicates with clients via [gRPC](https://grpc.io/), a high-performance RPC framework. It manages the state of the training round in-memory and pushes instructions to clients.
+
+In contrast, this project uses an asynchronous, artifact-based model. The server and clients never speak to each other directly, reducing the attack surface from a cybersecurity perspective, and removing complexities associated with brittle networking conditions. They communicate indirectly by publishing and polling versioned artifacts (models) in a central, persistent store (by default, a MLflow Model Registry). While this arguably makes for a single point of failure of the entire system, this can be easily remedied by building in redundancies that a user can be in complete control over, and are therefore suited for deployment and monitoring in highly-secured (corporate) environments.
+
+#### Asynchronous and Disconnected by Design
+
+This project's architecture is inherently built for unreliable and disconnected environments, which is common in real-world scenarios.
+
+In a standard Flower setup, clients need to be online and available to accept connections from the server for a training round to proceed. If a client is offline or behind a restrictive firewall, it can't participate.
+
+In contrast, our clients operate on their own schedule. They just need to be able to see the central (Gitlab) registry. A client can pull the global model, go offline for hours (or days) to train, and then push its result whenever it comes back online. The master node is equally patient; it simply waits for the required number of artifacts to appear. This is far more resilient.
+
+#### Superior Heterogeneity Management via Containerization
+
+While Flower supports heterogeneous devices, our approach handles it more robustly at a lower level.
+
+Flower manages heterogeneity at the Python level. The user is responsible for ensuring that the Python environment, including all system-level dependencies (like specific CUDA or cuDNN versions), is correctly configured on each client device. This can be very brittle.
+
+In contrast, we manage heterogeneity at the OS level using Docker. A user with an NVIDIA GPU can use a Dockerfile built `FROM nvidia/cuda`, while a user with an AMD GPU can use one built `FROM rocm/pytorch`; our framework is completely agnostic to this. As long as the container can run the entrypoint script and connect to GitLab, it can participate. This means that clients don't even need to write their training logic in Python; very lean Python bindings would be required to plug in an existing system written in a completely different language. This is a much stronger and more reliable form of isolation.
+
+#### Natively MLOps-Integrated and Auditable
+
+This framework isn't a standalone library; it's a complete workflow that is deeply integrated with a modern, best-in-class MLOps toolchain.
+
+Flower's library-only approach is different. To get features like versioning, artifact storage, and deployment orchestration, it is necessary to build an MLOps platform around it, integrating it with tools like MLflow, Docker, and a CI/CD system yourself.
+
+In contrast, our framework is built from these tools directly. The MLflow Model Registry provides a persistent, versioned, and auditable history of every single model from every client at every federated round. Whereas Flower's state is typically ephemeral and managed in-memory on the server, this framework allows a user to "go back in time" and see (and run model validation on) the exact model e.g. client #2 produced in round #5. This is incredibly powerful for debugging, compliance, and governance.
+
+#### Decoupled and Simplified Orchestration
+
+A typical Flower deployment requires a user to run and manage a long-lived server process and then start client processes that connect to it, which requires significant manual orchestration.
+
+While this also applies to workflows based on this framework, the difference lies on the architecture level. Our architecture is based on stateless, containerized jobs handled by an external scheduler of choice (AiQU). There is no central server to maintain. The "server" is just another Docker container that runs for one aggregation round and then idles. This model is more resource-efficient and fits perfectly into modern, event-driven CI/CD and job scheduling platforms like GitLab and AiQU.
+
+#### Enhanced Security through a Pull-Based Architecture
+
+This framework's communication model is fundamentally more secure than a traditional server-initiated approach like the one used by Flower. It isn't just an alternative communication method, it's an architecture that is arguably better suited for the realities of modern enterprise and institutional networks, oftentimes even necessary for deployments where security and operational simplicity are paramount.
+
+Flower uses gRPC, where the server actively initiates connections to the clients to send them instructions and configurations. This means every client must expose an open network port and listen for incoming connections from the server.
+
+Our model is based on client-initiated pull: clients are "dark" to the outside world, never accepting incoming connections. All communication is initiated outbound from the client to a single, well-known, and highly secured endpoint (the GitLab registry).
+
+This seemingly small difference has massive security and operational implications.
+
+##### Firewall and Network Traversal
+
+In any real-world corporate, hospital, or research environment, clients are behind strict firewalls that block all incoming connections by default. To make Flower work, network administrators would have to create complex and often risky firewall exceptions, VPNs, or reverse proxies for every single client. This is a major potential security hurdle and an operational difficulty.
+
+In contrast, our system model is inherently firewall-friendly. Outbound connections from a client to a server on a standard port (like HTTPS/443 for GitLab) are almost universally permitted. This framework works out-of-the-box in these high-security environments with no special network configuration required.
+
+##### Drastically Reduced Attack Surface
+
+Every client running a gRPC server is another potential point of entry in your system. The overall attack surface is large, and the security of the entire system depends on the security of its weakest client.
+
+In our approach, the attack surface is minimal, yet concentrated. The only point of entry is the GitLab server, which is already a hardened, professionally managed security endpoint. The clients themselves expose zero open ports, making them invisible and inaccessible to external attackers.
+
+##### Simplified Trust and Authentication
+
+In Flower, the server needs to know and trust the addresses of all its clients. Clients need to be configured to accept connections only from the legitimate server, often requiring complex mutual TLS (mTLS) certificate management to secure the connections.
+
+Here, the trust model is simpler. Clients only need to trust the central GitLab server and authenticate to it. There is no need for clients to manage incoming connections or for the server to even know the clients' network locations or configurations.
+
+####  Language Agnostic by Default
+
+Our architecture naturally supports a polyglot (multi-language) environment because the "contract" for participation is based on universal, language-agnostic standards: REST API calls and file I/O. For a client to participate in the federated learning network, it only needs to be able to do three things:
+
+1. Make an authenticated HTTPS GET request to download a model file.
+
+2. Perform some computation on that file.
+
+3. Make an authenticated HTTPS POST request to upload a new model file.
+
+The Implication: This is a trivial task in almost any modern programming language (C++, Java, Rust, Go, etc.). Every language has mature libraries for making HTTP requests and handling files. The user does not need a complex SDK.
+
+Containerization is the final piece of the puzzle. A user writing their client in C++ can use a Dockerfile with a C++ compiler, install the LibTorch library, and package their compiled application. As long as that container can make HTTP calls, it can be a first-class citizen in the federated learning network.
+
+For Flower, the Interface is a gRPC Service. For a client to participate in a Flower network, it must implement a specific gRPC service. This involves:
+
+1. Using Protocol Buffers (.proto files) to generate client-side code stubs.
+
+2. Implementing the logic for multiple RPC methods (GetParameters, Fit, Evaluate).
+
+3. Managing the lifecycle of a persistent gRPC connection to the server.
+
+While gRPC is theoretically language-agnostic, the entire Flower ecosystem and its tooling are Python-centric. There is a rich, high-level Python SDK that handles all the complex gRPC machinery for the user. For a C++ developer, this SDK does not exist. They would have to implement the entire client from scratch, dealing with low-level gRPC calls and Protobuf serialization of model weights. This is a significantly higher barrier to entry.
+
+| Feature                | This Framework                                                                 | Flower                                                                                   |
+|------------------------|-------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| Core Interface         | REST API + File I/O. A universal and simple standard.                         | gRPC Service. A complex RPC protocol requiring specific stubs.                           |
+| Barrier to Entry       | Low. Requires only a standard HTTP client and file access.                    | High. Requires implementing a complex gRPC client from scratch without an SDK.           |
+| Language Inter-<br>operability | Naturally high. The focus is on the data (the model file), not the code.       | Theoretically high, practically low. The ecosystem is heavily biased towards the Python SDK. |
+| Ecosystem Bias         | Language-agnostic, supports any environment with HTTP and file I/O.           | Python-centric, limited support for other languages.                                     |
+
+
+#### Conclusion
+
+Flower is an excellent, general-purpose framework for researchers and developers who want a library to quickly build and experiment with synchronous FL algorithms. The idea here isn't to replace or displace FL frameworks like Flower - our focus on simplicity, freedom from vendor lock-ins, and security, results in a different set of priorities that informs an overall different system design.
+
+We offer an MLOps-native framework for organizations that want to conduct robust, auditable, and asynchronous federated learning across highly diverse and even potentially unreliable compute environments, all within the safety and structure of their existing GitLab and container-based workflows.
