@@ -13,7 +13,7 @@
 # -------------------------------------------------------------------
 # Build Artifacts
 # -------------------------------------------------------------------
-# Because GitHub Actions builds these for you and pushes them to gh-pages, 
+# Because GitHub Actions builds these for you and pushes them to gh-pages,
 # you should not commit them to your main branch to avoid merge conflicts!
 *.html
 *.pdf
@@ -35,3 +35,5 @@ Desktop.ini
 .vscode/
 .Rproj.user/
 *.swp
+/.quarto/
+**/*.quarto_ipynb
