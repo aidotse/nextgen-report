@@ -15,7 +15,11 @@ format:
     toc-depth: 3
     toc-location: right
     page-layout: article
-    format-links: [pdf]
+    format-links: false
+    other-links:
+      - text: PDF
+        href: index.pdf
+        icon: file-pdf 
     theme: 
       light: minimal
       dark: darkly
